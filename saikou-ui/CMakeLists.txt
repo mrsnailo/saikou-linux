@@ -72,3 +72,5 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/io.github.saikou.Saikou.d
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/io.github.saikou.Saikou.metainfo.xml
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../packaging/io.github.saikou.Saikou.svg
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps)

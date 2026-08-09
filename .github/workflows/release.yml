@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (without the leading v)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    name: AppImage
+    # Built on Ubuntu rather than Arch on purpose. A binary linked against an older glibc
+    # runs on newer systems but not the other way round, so building on the oldest
+    # supported distro is what makes one AppImage work everywhere — including Arch.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev \
+            libmpv-dev \
+            openjdk-21-jdk \
+            fuse libfuse2 desktop-file-utils file
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build AppImage
+        env:
+          SAIKOU_VERSION: ${{ steps.version.outputs.value }}
+        run: ./scripts/build-appimage.sh
+
+      - name: Smoke-test the bundled core
+        run: |
+          # The AppImage is useless if its trimmed JVM cannot reach AniList over TLS, and
+          # that is exactly the kind of breakage jlink causes silently.
+          ./dist/Saikou-*-x86_64.AppImage --appimage-extract > /dev/null
+          APPDIR="$PWD/squashfs-root" ./squashfs-root/usr/bin/saikou-core --socket /tmp/rel.sock &
+          for _ in $(seq 1 40); do [ -S /tmp/rel.sock ] && break; sleep 0.25; done
+          python3 - <<'PY'
+          import socket, json
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect("/tmp/rel.sock")
+          f = s.makefile("rw")
+          f.write(json.dumps({"jsonrpc":"2.0","id":1,"method":"anilist.trending",
+                              "params":{"perPage":1}}) + "\n"); f.flush()
+          reply = json.loads(f.readline())
+          media = reply.get("result", {}).get("media")
+          assert media, f"AniList query failed in the bundled runtime: {reply}"
+          print("bundled core reached AniList:", media[0]["title"]["userPreferred"])
+          PY
+
+      - name: Build source tarball
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          git archive --format=tar.gz --prefix="saikou-linux-$VERSION/" \
+            -o "dist/saikou-linux-$VERSION-source.tar.gz" HEAD
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: saikou-appimage
+          path: dist/*
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "Saikou $VERSION" \
+            --generate-notes \
+            --notes "
+          ## Install
+
+          \`\`\`sh
+          chmod +x Saikou-$VERSION-x86_64.AppImage
+          ./Saikou-$VERSION-x86_64.AppImage
+          \`\`\`
+
+          Self-contained: Qt, mpv and a trimmed Java runtime are bundled, so there is
+          nothing to install first.
+
+          ## Before it can play anything
+
+          Video sources need a backend API that this repository does not ship. Set it under
+          **Settings → Anime backend**, or launch with \`SAIKOU_API_HOST\` and
+          \`SAIKOU_API_KEY\`. AniList browsing, search and tracking work without it.
+          "

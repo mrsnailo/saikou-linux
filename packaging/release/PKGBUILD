@@ -1,0 +1,52 @@
+# Builds a release package from a source tarball produced by `git archive`.
+# CI generates the tarball next to this file; see .github/workflows/release.yml.
+# The AUR-style git package lives in ../PKGBUILD.
+pkgname=saikou-linux
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native Linux anime client with AniList tracking (Qt6 + mpv)"
+arch=('x86_64')
+url="https://github.com/mrsnailo/saikou-linux"
+license=('GPL-3.0-or-later')
+
+# A JVM is a runtime dependency: the scraping core is a daemon the UI spawns. Declared as
+# the virtual packages rather than jre-openjdk/jdk-openjdk, which conflict with each other
+# — any JDK already provides java-runtime, so a developer's machine needs no second JVM.
+depends=('qt6-base' 'mpv' 'java-runtime>=21' 'hicolor-icon-theme')
+# The build JDK is pinned rather than virtual: Arch's default JDK runs ahead of what the
+# Gradle wrapper understands, and Gradle fails on the version string alone.
+makedepends=('cmake' 'ninja' 'jdk21-openjdk')
+options=('!debug' '!strip')
+
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Keep Gradle's cache inside the build dir; makepkg builds must not write to $HOME.
+    export GRADLE_USER_HOME="$srcdir/.gradle"
+    export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+    ./gradlew :saikou-core:installDist --no-daemon --console=plain
+
+    cmake -S saikou-ui -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Installs the binary, desktop entry, AppStream metadata and icon.
+    DESTDIR="$pkgdir" cmake --install build
+
+    # The core ships as its jars plus a launcher that runs them on the system JRE.
+    install -dm755 "$pkgdir/usr/lib/saikou"
+    cp -r saikou-core/build/install/saikou-core/lib "$pkgdir/usr/lib/saikou/lib"
+
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/saikou-core" <<'EOF'
+#!/bin/sh
+exec java -cp "/usr/lib/saikou/lib/*" ani.saikou.MainKt "$@"
+EOF
+}
