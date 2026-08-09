@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Saikou
+GenericName=Anime Client
+Comment=Watch anime and track your AniList library
+Exec=saikou-ui %u
+Icon=io.github.saikou.Saikou
+Terminal=false
+Categories=AudioVideo;Video;Player;Network;
+Keywords=anime;anilist;mal;streaming;
+StartupNotify=true
+StartupWMClass=io.github.saikou.Saikou
+# Registers the saikou:// scheme so the AniList/MAL OAuth redirect lands back in the app
+# instead of a dead browser tab.
+MimeType=x-scheme-handler/saikou;
+SingleMainWindow=true

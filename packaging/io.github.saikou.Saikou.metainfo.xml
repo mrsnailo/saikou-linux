@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.saikou.Saikou</id>
+  <launchable type="desktop-id">io.github.saikou.Saikou.desktop</launchable>
+
+  <name>Saikou</name>
+  <summary>Native anime client with AniList tracking</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      A native Linux client for Saikou. Browse and watch anime from community sources,
+      with playback handled by mpv and your library synced to AniList or MyAnimeList.
+    </p>
+    <p>
+      Saikou does not host or distribute any content. It reads publicly available
+      websites, exactly as a browser would.
+    </p>
+  </description>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <releases>
+    <release version="0.1.0" type="development" date="2026-08-09">
+      <description>
+        <p>Phase 0: project scaffolding, core daemon, and RPC transport.</p>
+      </description>
+    </release>
+  </releases>
+</component>

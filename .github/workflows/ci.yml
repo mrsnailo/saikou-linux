@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Arch is the primary target, so it is the platform CI builds on — a green build here
+  # is what a PKGBUILD needs to succeed.
+  build:
+    name: Build (Arch Linux)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            git jdk21-openjdk \
+            cmake ninja gcc pkgconf \
+            qt6-base qt6-tools \
+            mpv appstream openbsd-netcat
+
+      - uses: actions/checkout@v4
+
+      - name: Build core
+        run: ./gradlew :saikou-core:build --no-daemon --stacktrace
+
+      - name: Build UI
+        run: |
+          cmake -S saikou-ui -B saikou-ui/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSAIKOU_WITH_MPV=ON
+          cmake --build saikou-ui/build
+
+      - name: Validate desktop and AppStream metadata
+        run: |
+          desktop-file-validate packaging/io.github.saikou.Saikou.desktop
+          appstreamcli validate --no-net packaging/io.github.saikou.Saikou.metainfo.xml
+
+      - name: Smoke-test the RPC daemon
+        run: |
+          ./gradlew :saikou-core:installDist --no-daemon
+          ./scripts/rpc-smoke-test.sh
