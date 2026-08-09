@@ -30,9 +30,7 @@ jobs:
 
       - name: Build UI
         run: |
-          cmake -S saikou-ui -B saikou-ui/build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSAIKOU_WITH_MPV=ON
+          cmake -S saikou-ui -B saikou-ui/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build saikou-ui/build
 
       - name: Validate desktop and AppStream metadata

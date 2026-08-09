@@ -9,6 +9,13 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
 
+  <url type="homepage">https://github.com/mrsnailo/saikou-linux</url>
+  <url type="bugtracker">https://github.com/mrsnailo/saikou-linux/issues</url>
+
+  <developer id="io.github.mrsnailo">
+    <name>mrsnailo</name>
+  </developer>
+
   <description>
     <p>
       A native Linux client for Saikou. Browse and watch anime from community sources,
@@ -33,6 +40,17 @@
   <requires>
     <display_length compare="ge">768</display_length>
   </requires>
+
+  <!--
+    Saikou displays whatever the community sources return, so the ceiling is set by that
+    content rather than by anything the app itself ships.
+  -->
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-cartoon">moderate</content_attribute>
+    <content_attribute id="violence-fantasy">moderate</content_attribute>
+    <content_attribute id="sex-themes">mild</content_attribute>
+    <content_attribute id="language-profanity">mild</content_attribute>
+  </content_rating>
 
   <releases>
     <release version="0.1.0" type="development" date="2026-08-09">
