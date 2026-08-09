@@ -6,7 +6,9 @@ Comment=Watch anime and track your AniList library
 Exec=saikou-ui %u
 Icon=io.github.saikou.Saikou
 Terminal=false
-Categories=AudioVideo;Video;Player;Network;
+# AudioVideo is the only main category listed on purpose: adding Network too makes the
+# app show up twice in the KDE application menu.
+Categories=AudioVideo;Video;Player;
 Keywords=anime;anilist;mal;streaming;
 StartupNotify=true
 StartupWMClass=io.github.saikou.Saikou

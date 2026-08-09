@@ -23,21 +23,28 @@ them the sources report themselves unavailable and the app explains why. See
 
 ## Installing
 
-Dependencies on Arch:
+### From a release (recommended on Arch)
+
+Download the `.pkg.tar.zst` from the [latest release](https://github.com/mrsnailo/saikou-linux/releases)
+and install it:
 
 ```sh
-sudo pacman -S --needed qt6-base mpv jre-openjdk jdk-openjdk cmake ninja base-devel
+sudo pacman -U saikou-linux-*-x86_64.pkg.tar.zst
 ```
 
-Then, from a checkout:
+pacman pulls in `qt6-base`, `mpv` and a JRE. Saikou then appears in your application
+launcher and KRunner.
+
+### From source
 
 ```sh
+sudo pacman -S --needed qt6-base mpv jdk21-openjdk cmake ninja base-devel
 ./scripts/install-local.sh
 ```
 
-That builds both halves and installs them into `~/.local`, including the desktop entry, so
-Saikou shows up in your application launcher and KRunner. `packaging/PKGBUILD` does the
-same system-wide via `makepkg -si`.
+That installs into `~/.local` without root. To build a package instead, use
+`packaging/release/PKGBUILD` with a source tarball, or `packaging/PKGBUILD` for an
+AUR-style build straight from git.
 
 ## Connecting AniList
 
