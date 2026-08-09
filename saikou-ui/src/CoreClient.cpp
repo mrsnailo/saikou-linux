@@ -7,11 +7,29 @@
 
 #include <unistd.h>
 
+namespace {
+constexpr int kRetryIntervalMs = 400;
+constexpr int kMaxAttempts = 40; // ~16 seconds, enough for a cold JVM start
+}
+
 CoreClient::CoreClient(QObject *parent)
     : QObject(parent)
     , m_socket(new QLocalSocket(this))
+    , m_retry(new QTimer(this))
 {
-    connect(m_socket, &QLocalSocket::connected, this, &CoreClient::connected);
+    m_retry->setInterval(kRetryIntervalMs);
+    connect(m_retry, &QTimer::timeout, this, [this] {
+        if (m_socket->state() == QLocalSocket::UnconnectedState) {
+            m_socket->connectToServer(m_socketPath);
+        }
+    });
+
+    connect(m_socket, &QLocalSocket::connected, this, [this] {
+        m_retry->stop();
+        m_attempts = 0;
+        Q_EMIT connected();
+    });
+
     connect(m_socket, &QLocalSocket::readyRead, this, &CoreClient::onReadyRead);
 
     connect(m_socket, &QLocalSocket::disconnected, this, [this] {
@@ -20,6 +38,10 @@ CoreClient::CoreClient(QObject *parent)
     });
 
     connect(m_socket, &QLocalSocket::errorOccurred, this, [this](QLocalSocket::LocalSocketError) {
+        if (m_retry->isActive() && ++m_attempts < kMaxAttempts) {
+            return; // still waiting for the daemon to come up; stay quiet
+        }
+        m_retry->stop();
         Q_EMIT connectionError(m_socket->errorString());
     });
 }
@@ -35,14 +57,18 @@ QString CoreClient::defaultSocketPath()
 
 void CoreClient::connectToCore(const QString &socketPath)
 {
+    m_socketPath = socketPath;
     if (m_socket->state() != QLocalSocket::UnconnectedState) {
         return;
     }
+    m_attempts = 0;
+    m_retry->start();
     m_socket->connectToServer(socketPath);
 }
 
 void CoreClient::disconnectFromCore()
 {
+    m_retry->stop();
     m_socket->disconnectFromServer();
 }
 

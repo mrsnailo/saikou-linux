@@ -6,6 +6,7 @@
 #include <QLocalSocket>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
 #include <functional>
 
@@ -34,6 +35,9 @@ public:
     /// Default socket path: $XDG_RUNTIME_DIR/saikou/core.sock
     static QString defaultSocketPath();
 
+    /// Connects, retrying until the daemon binds its socket. The core is a JVM process,
+    /// so it is listening a beat after the OS reports it as started — a single attempt
+    /// loses that race and leaves the UI dead.
     void connectToCore(const QString &socketPath = defaultSocketPath());
     void disconnectFromCore();
     bool isConnected() const;
@@ -56,5 +60,8 @@ private:
     QLocalSocket *m_socket;
     QByteArray m_buffer;
     QHash<int, Callback> m_pending;
+    QString m_socketPath;
+    QTimer *m_retry;
+    int m_attempts = 0;
     int m_nextId = 1;
 };

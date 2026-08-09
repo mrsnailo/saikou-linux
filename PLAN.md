@@ -122,6 +122,27 @@ exists.
   and `CoreProcess` supervising the daemon with restart backoff.
 - `scripts/rpc-smoke-test.sh` and a GitHub Actions job building both halves on Arch.
 
+### Blocker found in Phase 1 — no usable video source
+
+Every general anime source in the Android app (Anikoto, AniBD, Anizone, AnimeHeaven,
+AniDB, AllAnime, AnimePahe) extends one class whose `hostUrl` is `BuildConfig.SERVER_URL`
+and whose key is `BuildConfig.MY_CUSTOM_API_KEY`. Those are build-time injected secrets
+and are not in this repository, so **no source can fetch anything**. The only parsers with
+real public hosts are Marin and the four hentai sites.
+
+AllAnime's own public GraphQL API was tested as a replacement and returns a Cloudflare
+interactive challenge, which is the D3/D4 problem — it needs a browser engine.
+
+Resolution taken: the backend host and key became runtime settings rather than build
+constants, so supplying them enables all seven sources at once. The pipeline is verified
+end to end against a mock backend. The outstanding decision is **which** source backend
+to use:
+
+- **A — supply the private backend's url and key.** Cheapest by far; everything already
+  written starts working immediately.
+- **B — write a new parser against a public site**, accepting a Cloudflare dependency
+  (QtWebEngine or FlareSolverr) and the maintenance that comes with scraping.
+
 ### Phase 1 — Vertical slice, one anime source
 - Port **AllAnime only** end-to-end: strip Android imports, route it through the host
   seams, and replace NiceHttp with a thin OkHttp wrapper keeping the same call surface

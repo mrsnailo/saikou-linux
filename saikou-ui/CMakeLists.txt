@@ -18,7 +18,12 @@ endif()
 
 # Qt Widgets, not QtQuick: decision D2. Widgets pick up Breeze on Plasma and QGtkTheme
 # on GNOME for free, which is the whole point of the native-look requirement.
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network DBus)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network DBus OpenGLWidgets)
+
+# libmpv is the player, not an optional extra. Found through pkg-config so a packager
+# gets a clear configure-time error rather than a link failure.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
 
 qt_standard_project_setup()
 
@@ -28,8 +33,20 @@ add_executable(saikou-ui
     src/CoreClient.h
     src/CoreProcess.cpp
     src/CoreProcess.h
+    src/DetailsPage.cpp
+    src/DetailsPage.h
+    src/ImageLoader.cpp
+    src/ImageLoader.h
     src/MainWindow.cpp
     src/MainWindow.h
+    src/MediaGrid.cpp
+    src/MediaGrid.h
+    src/MpvWidget.cpp
+    src/MpvWidget.h
+    src/PlayerWindow.cpp
+    src/PlayerWindow.h
+    src/SettingsDialog.cpp
+    src/SettingsDialog.h
 )
 
 target_link_libraries(saikou-ui PRIVATE
@@ -38,6 +55,8 @@ target_link_libraries(saikou-ui PRIVATE
     Qt6::Widgets
     Qt6::Network
     Qt6::DBus
+    Qt6::OpenGLWidgets
+    PkgConfig::MPV
 )
 
 target_compile_definitions(saikou-ui PRIVATE
@@ -45,16 +64,6 @@ target_compile_definitions(saikou-ui PRIVATE
 )
 
 target_compile_options(saikou-ui PRIVATE -Wall -Wextra -Wpedantic)
-
-# libmpv arrives in Phase 1 together with the player widget. Declared here so a missing
-# dependency shows up at configure time on a packager's machine, not at feature time.
-option(SAIKOU_WITH_MPV "Build the mpv-backed player" OFF)
-if(SAIKOU_WITH_MPV)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
-    target_link_libraries(saikou-ui PRIVATE PkgConfig::MPV)
-    target_compile_definitions(saikou-ui PRIVATE SAIKOU_WITH_MPV)
-endif()
 
 include(GNUInstallDirs)
 

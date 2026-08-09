@@ -1,7 +1,9 @@
 package ani.saikou.rpc
 
 import ani.saikou.BuildInfo
+import ani.saikou.anilist.Auth
 import ani.saikou.host.Preferences
+import ani.saikou.parsers.anime.ApiBackend
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -37,7 +39,8 @@ fun Registry.registerCoreMethods() {
     register("core.capabilities") { _, _ ->
         buildJsonObject {
             put("webengine", false)
-            put("anime", true)
+            put("anime", ApiBackend.isConfigured)
+            put("anilist", Auth.isConfigured)
             put("manga", false)
             put("novel", false)
         }
@@ -55,8 +58,6 @@ fun Registry.registerCoreMethods() {
         JsonPrimitive(true)
     }
 
-    // Phase 1 replaces this with the real source registry.
-    register("anime.sources") { _, _ -> buildJsonArray { } }
 }
 
 private fun JsonElement?.requireString(key: String): String {

@@ -4,13 +4,14 @@
 
 class CoreClient;
 class CoreProcess;
+class DetailsPage;
+class MediaGrid;
 class QLabel;
 class QLineEdit;
-class QListWidget;
 class QStackedWidget;
+class QTabWidget;
 
-/// Phase 0 shell: the window, the search field, and a live core-status indicator.
-/// Phase 1 fills the stack with the real home / results / details pages.
+/// The main window: a home screen of AniList rows, a search view, and a details page.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -21,14 +22,23 @@ private:
     void buildUi();
     void wireCore();
     void setStatus(const QString &text, bool healthy);
+
+    void refreshHome();
+    void loadContinueWatching();
     void search(const QString &query);
+    void openDetails(int mediaId);
+    void openSettings();
 
     CoreProcess *m_core;
     CoreClient *m_client;
 
     QLineEdit *m_search = nullptr;
     QStackedWidget *m_pages = nullptr;
-    QListWidget *m_results = nullptr;
-    QLabel *m_placeholder = nullptr;
+    QTabWidget *m_home = nullptr;
+    MediaGrid *m_continueWatching = nullptr;
+    MediaGrid *m_trending = nullptr;
+    MediaGrid *m_season = nullptr;
+    MediaGrid *m_results = nullptr;
+    DetailsPage *m_details = nullptr;
     QLabel *m_status = nullptr;
 };

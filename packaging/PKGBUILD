@@ -1,0 +1,56 @@
+# Maintainer: your name <you@example.com>
+pkgname=saikou-linux-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native Linux anime client with AniList tracking (Qt6 + mpv)"
+arch=('x86_64')
+url="https://github.com/mrsnailo/saikou-linux"
+license=('GPL-3.0-or-later')
+
+# jre-openjdk is a runtime dependency: the scraping core is a JVM daemon the UI spawns.
+depends=('qt6-base' 'mpv' 'jre-openjdk' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'jdk-openjdk' 'git')
+provides=('saikou-linux')
+conflicts=('saikou-linux')
+
+source=("$pkgname::git+https://github.com/mrsnailo/saikou-linux.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/$pkgname"
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "$srcdir/$pkgname"
+
+    # Gradle must not touch the network cache outside the build dir, and makepkg builds
+    # offline-hostile setups fail loudly rather than silently using $HOME.
+    export GRADLE_USER_HOME="$srcdir/.gradle"
+    ./gradlew :saikou-core:installDist --no-daemon
+
+    cmake -S saikou-ui -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    cd "$srcdir/$pkgname"
+
+    DESTDIR="$pkgdir" cmake --install build
+
+    # The core ships as a jar plus a launcher script under /usr/lib/saikou.
+    install -dm755 "$pkgdir/usr/lib/saikou"
+    cp -r saikou-core/build/install/saikou-core/lib "$pkgdir/usr/lib/saikou/lib"
+
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/saikou-core" <<'EOF'
+#!/bin/sh
+exec java -cp "/usr/lib/saikou/lib/*" ani.saikou.MainKt "$@"
+EOF
+
+    install -Dm644 packaging/io.github.saikou.Saikou.desktop \
+        "$pkgdir/usr/share/applications/io.github.saikou.Saikou.desktop"
+    install -Dm644 packaging/io.github.saikou.Saikou.metainfo.xml \
+        "$pkgdir/usr/share/metainfo/io.github.saikou.Saikou.metainfo.xml"
+}

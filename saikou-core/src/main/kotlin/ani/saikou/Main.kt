@@ -1,10 +1,13 @@
 package ani.saikou
 
+import ani.saikou.anilist.Auth
 import ani.saikou.host.Log
 import ani.saikou.host.Paths
 import ani.saikou.host.Preferences
 import ani.saikou.rpc.Registry
 import ani.saikou.rpc.Server
+import ani.saikou.rpc.registerAniListMethods
+import ani.saikou.rpc.registerAnimeMethods
 import ani.saikou.rpc.registerCoreMethods
 import java.nio.channels.FileChannel
 import java.nio.file.Path
@@ -40,7 +43,13 @@ fun main(args: Array<String>) {
         exitProcess(2)
     }
 
-    val registry = Registry().apply { registerCoreMethods() }
+    Auth.loadSavedToken()
+
+    val registry = Registry().apply {
+        registerCoreMethods()
+        registerAniListMethods()
+        registerAnimeMethods()
+    }
     val server = Server(socket, registry)
 
     Runtime.getRuntime().addShutdownHook(Thread {
