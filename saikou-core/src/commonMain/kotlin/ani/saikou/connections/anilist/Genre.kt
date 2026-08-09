@@ -1,10 +1,12 @@
 package ani.saikou.connections.anilist
+import io.ktor.http.*
 
-import java.io.Serializable
+
+import kotlinx.serialization.Serializable
 
 data class Genre(
     val name: String,
     var id: Int,
     var thumbnail: String,
     var time: Long,
-) : Serializable
+) 
