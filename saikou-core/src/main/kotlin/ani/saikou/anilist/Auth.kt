@@ -47,7 +47,7 @@ object Auth {
      * Overridable at runtime with SAIKOU_ANILIST_CLIENT_ID, which is also how a fork avoids
      * having to patch this constant.
      */
-    const val DEFAULT_CLIENT_ID = ""
+    const val DEFAULT_CLIENT_ID = "48249"
 
     const val DEFAULT_PORT = 8998
     const val CALLBACK_PATH = "/callback"
