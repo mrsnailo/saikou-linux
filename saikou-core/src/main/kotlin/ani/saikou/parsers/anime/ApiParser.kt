@@ -204,12 +204,6 @@ class AniDB : ApiParser() {
     override val shape = Shape.FLAT_SERVERS
 }
 
-class AllAnime : ApiParser() {
-    override val name = "AllAnime"
-    override val providerName = "allanime"
-    override val shape = Shape.FLAT_SERVERS
-}
-
 class AnimePahe : ApiParser() {
     override val name = "AnimePahe"
     override val providerName = "animepahe"

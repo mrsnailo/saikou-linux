@@ -12,19 +12,28 @@ import ani.saikou.parsers.anime.Anizone
 /**
  * The anime source registry.
  *
- * Every general source proxies through the backend API, so all of them are unavailable
- * until it is configured. [availability] is what the UI shows: a source the user cannot
- * use should say why, not fail when clicked.
+ * AllAnime talks to its own public API and is always available, so a fresh install can
+ * play something without any configuration. The rest proxy through the private backend
+ * described in [ApiBackend] and stay unavailable until it is set up; [availability] is
+ * what the UI shows, because a source the user cannot use should say why rather than fail
+ * when clicked.
  */
 object AnimeSources {
-    private val factories: List<Pair<String, () -> AnimeParser>> = listOf(
-        "Anikoto" to ::Anikoto,
-        "AniBD" to ::AniBD,
-        "Anizone" to ::Anizone,
-        "AnimeHeaven" to ::AnimeHeaven,
-        "AniDB" to ::AniDB,
-        "AllAnime" to ::AllAnime,
-        "AnimePahe" to ::AnimePahe,
+    private data class Entry(
+        val name: String,
+        val factory: () -> AnimeParser,
+        /** False for the sources that only work through the private backend API. */
+        val standalone: Boolean,
+    )
+
+    private val entries: List<Entry> = listOf(
+        Entry("AllAnime", ::AllAnime, standalone = true),
+        Entry("Anikoto", ::Anikoto, standalone = false),
+        Entry("AniBD", ::AniBD, standalone = false),
+        Entry("Anizone", ::Anizone, standalone = false),
+        Entry("AnimeHeaven", ::AnimeHeaven, standalone = false),
+        Entry("AniDB", ::AniDB, standalone = false),
+        Entry("AnimePahe", ::AnimePahe, standalone = false),
     )
 
     private val instances = mutableMapOf<String, AnimeParser>()
@@ -34,22 +43,34 @@ object AnimeSources {
     @Synchronized
     fun get(name: String): AnimeParser? {
         instances[name]?.let { return it }
-        val factory = factories.firstOrNull { it.first.equals(name, ignoreCase = true) } ?: return null
-        return factory.second().also { instances[factory.first] = it }
+        val entry = entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
+        return entry.factory().also { instances[entry.name] = it }
     }
 
-    fun names(): List<String> = factories.map { it.first }
+    fun names(): List<String> = entries.map { it.name }
+
+    /** True when this source works without the private backend API. */
+    fun isStandalone(name: String): Boolean =
+        entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.standalone == true
 
     fun availability(): List<Availability> {
         val configured = ApiBackend.isConfigured
-        val reason = if (configured) {
-            null
-        } else {
-            "Needs an anime backend. Set it in Settings, or with SAIKOU_API_HOST and SAIKOU_API_KEY."
+        return entries.map { entry ->
+            val enabled = entry.standalone || configured
+            Availability(
+                name = entry.name,
+                enabled = enabled,
+                reason = if (enabled) {
+                    null
+                } else {
+                    "Needs the private backend API. Set it in Settings → Sources, or with " +
+                        "SAIKOU_API_HOST and SAIKOU_API_KEY."
+                },
+            )
         }
-        return factories.map { Availability(it.first, configured, reason) }
     }
 
-    /** The source to use when the user has not picked one. */
-    fun default(): AnimeParser? = names().firstNotNullOfOrNull { get(it) }.takeIf { ApiBackend.isConfigured }
+    /** The source to use when the user has not picked one: the first usable entry. */
+    fun default(): AnimeParser? =
+        entries.firstOrNull { it.standalone || ApiBackend.isConfigured }?.let { get(it.name) }
 }

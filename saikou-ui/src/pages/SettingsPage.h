@@ -28,7 +28,10 @@ public:
     void showAccountSection();
 
 Q_SIGNALS:
+    /** A sign-in completed. */
     void loggedIn();
+    /** Sign-in state changed in either direction; the shell should re-read the viewer. */
+    void accountChanged();
     void backendChanged();
     void statusMessage(const QString &message, bool healthy);
 
@@ -44,7 +47,9 @@ private:
     void refreshAccountStatus();
     void refreshSources();
     void saveAniListClient();
+    void clearAniListClient();
     void startLogin();
+    void signOut();
     void saveBackend();
     void applyThemeSelection(int mode);
 
@@ -59,6 +64,9 @@ private:
     QLineEdit *m_clientId = nullptr;
     QLineEdit *m_clientSecret = nullptr;
     QPushButton *m_login = nullptr;
+    QPushButton *m_signOut = nullptr;
+    QPushButton *m_advancedToggle = nullptr;
+    QWidget *m_advanced = nullptr;
     QLabel *m_loginStatus = nullptr;
 
     QLineEdit *m_backendHost = nullptr;

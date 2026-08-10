@@ -314,6 +314,15 @@ QPushButton[accent="true"] {
 }
 QPushButton[accent="true"]:hover { background: %(accentLight); }
 QPushButton[accent="true"]:pressed { background: %(accentPressed); }
+/* The variant rules are more specific than the plain :disabled one above, so each needs
+   its own; without this a disabled primary button still reads as the main action. */
+QPushButton[accent="true"]:disabled,
+QPushButton[ghost="true"]:disabled,
+QPushButton[quiet="true"]:disabled {
+    background: %(surface);
+    border-color: %(border);
+    color: %(disabled);
+}
 QPushButton[quiet="true"] {
     background: transparent;
     border-color: transparent;

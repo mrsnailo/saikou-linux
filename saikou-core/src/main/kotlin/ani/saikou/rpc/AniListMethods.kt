@@ -21,20 +21,30 @@ fun Registry.registerAniListMethods() {
         buildJsonObject {
             put("configured", Auth.isConfigured)
             put("loggedIn", Auth.isLoggedIn)
+            put("usesOwnClient", Auth.usesOwnClient)
+            put("clientId", Auth.clientId ?: "")
             put("redirectUri", Auth.redirectUri)
             put("developerUrl", "https://anilist.co/settings/developer")
         }
     }
 
-    /** Stores the user's own AniList API client credentials. */
+    /**
+     * Points sign-in at a client of the user's own. Optional — the build ships its own
+     * client id and the one-click flow needs nothing from the user. Passing blanks clears
+     * the override and returns to the built-in client.
+     */
     register("anilist.configure") { params, _ ->
         val obj = params.obj()
         Auth.configure(
-            clientId = obj.string("clientId"),
-            clientSecret = obj.string("clientSecret"),
+            clientId = obj["clientId"]?.jsonPrimitive?.content.orEmpty(),
+            clientSecret = obj["clientSecret"]?.jsonPrimitive?.content.orEmpty(),
             port = obj["port"]?.jsonPrimitive?.content?.toIntOrNull(),
         )
-        buildJsonObject { put("redirectUri", Auth.redirectUri) }
+        buildJsonObject {
+            put("redirectUri", Auth.redirectUri)
+            put("configured", Auth.isConfigured)
+            put("usesOwnClient", Auth.usesOwnClient)
+        }
     }
 
     /** The url the UI opens in a browser. Paired with `anilist.awaitLogin`. */

@@ -16,12 +16,12 @@ Working today:
 - mpv playback through the render API (works on Wayland), with subtitles and referer-locked streams
 - The full source pipeline: search → episodes → servers → stream resolution
 
-**Not working: video sources.** All seven ported sources (Anikoto, AniBD, Anizone,
-AnimeHeaven, AniDB, AllAnime, AnimePahe) proxy through a single private backend API. The
-Android app injected its address and key at build time as `BuildConfig.SERVER_URL` and
-`BuildConfig.MY_CUSTOM_API_KEY`; neither value is in this repository. Until you supply
-them the sources report themselves unavailable and the app explains why. See
-[Anime sources](#anime-sources).
+**Sources:** AllAnime works out of the box — it talks to its own public API and needs no
+configuration. The other six (Anikoto, AniBD, Anizone, AnimeHeaven, AniDB, AnimePahe)
+proxy through a single private backend API. The Android app injected its address and key
+at build time as `BuildConfig.SERVER_URL` and `BuildConfig.MY_CUSTOM_API_KEY`; neither
+value is in this repository, so those six report themselves unavailable until you supply
+them. See [Anime sources](#anime-sources).
 
 ## Installing
 
@@ -50,19 +50,34 @@ AUR-style build straight from git.
 
 ## Connecting AniList
 
-Saikou signs in with your own AniList API client, so no shared secret ships in the binary.
+**Settings → Account → Sign in with AniList.** Your browser opens, you approve, and the
+tab hands the token back. Nothing to create, nothing to paste.
 
-1. Open <https://anilist.co/settings/developer> and create a new client.
-2. Set its redirect url to exactly `http://localhost:8998/callback`.
-3. In Saikou, open **Settings → Account**, paste the client id and secret, and press
-   **Save client**.
-4. Press **Sign in to AniList**. Your browser opens; approve, and the tab closes itself.
+That works through the implicit grant, which returns the token in the URL *fragment* —
+something a loopback listener never receives. Saikou's listener answers the redirect with
+a page whose only job is to read `location.hash` and call the listener back with it, so no
+client secret is involved at any point.
+
+The client id this build signs in with is `Auth.DEFAULT_CLIENT_ID` in
+`saikou-core/src/main/kotlin/ani/saikou/anilist/Auth.kt`, overridable at runtime with
+`SAIKOU_ANILIST_CLIENT_ID`. A client id is public by design under the implicit grant.
+
+If you would rather the token be issued to a client you control, **Use my own AniList
+client** under the same panel takes a client id (and, optionally, a secret — supplying one
+switches to the stricter authorization-code grant). Register it at
+<https://anilist.co/settings/developer> with the redirect url `http://localhost:8998/callback`.
 
 Progress syncs automatically once you pass 85% of an episode.
 
 ## Anime sources
 
-Set the backend in **Settings → Sources**, or with environment variables:
+**AllAnime** needs nothing: it queries allanime.day's public GraphQL API directly. Its
+endpoint sits behind Cloudflare, which lets ordinary residential connections through but
+frequently challenges datacentre and VPN addresses; when that happens the source says so
+rather than failing silently.
+
+The remaining six proxy through the private backend API. Set it in **Settings → Sources**,
+or with environment variables:
 
 ```sh
 SAIKOU_API_HOST=https://your-backend SAIKOU_API_KEY=your-key saikou-ui

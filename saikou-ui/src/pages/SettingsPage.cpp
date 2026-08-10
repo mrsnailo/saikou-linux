@@ -102,7 +102,6 @@ SettingsPage::SettingsPage(CoreClient *client, QWidget *parent)
     m_sections->addItem(tr("Account"));
     m_sections->addItem(tr("Sources"));
     m_sections->addItem(tr("About"));
-    m_sections->setCurrentRow(Appearance);
     row->addWidget(m_sections);
 
     m_panels = new QStackedWidget(this);
@@ -112,7 +111,10 @@ SettingsPage::SettingsPage(CoreClient *client, QWidget *parent)
     m_panels->addWidget(scrollWrap(buildAboutPanel()));
     row->addWidget(m_panels, 1);
 
+    // Connected before the initial selection is made, or the stack would stay on whatever
+    // it was showing while the list highlighted a different row.
     connect(m_sections, &QListWidget::currentRowChanged, m_panels, &QStackedWidget::setCurrentIndex);
+    m_sections->setCurrentRow(Appearance);
     connect(Theme::instance(), &Theme::changed, this, qOverload<>(&QWidget::update));
 }
 
@@ -211,54 +213,27 @@ QWidget *SettingsPage::buildAccountPanel()
     column->setSpacing(0);
 
     column->addWidget(new TokenLabel(tr("Account"), TokenLabel::Foreground, Type::h2(), panel));
-    column->addSpacing(22);
+    column->addSpacing(18);
 
     auto *explanation = new TokenLabel(
-        tr("Saikou signs in with your own AniList API client. Create one at "
-           "anilist.co/settings/developer, set its redirect url to the value below, then "
-           "paste the id and secret here."),
+        tr("Saikou tracks your progress on AniList. Sign in once and it stays signed in — "
+           "your browser opens, you approve, and the tab hands the token back."),
         TokenLabel::Muted, Type::body(), panel);
     explanation->setWordWrap(true);
     column->addWidget(explanation);
-    column->addSpacing(8);
-
-    auto *openDeveloper = makePillButton(tr("Open AniList developer settings"),
-                                         ButtonVariant::Ghost, Icons::ExternalLink, panel);
-    connect(openDeveloper, &QPushButton::clicked, this, [] {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("https://anilist.co/settings/developer")));
-    });
-    column->addWidget(openDeveloper, 0, Qt::AlignLeft);
     column->addSpacing(24);
-
-    auto *form = new QFormLayout;
-    form->setSpacing(12);
-    form->setLabelAlignment(Qt::AlignLeft);
-
-    m_redirect = new TokenLabel(QString(), TokenLabel::Accent2, Type::body(), panel);
-    m_redirect->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    form->addRow(new TokenLabel(tr("Redirect url"), TokenLabel::Muted, Type::small(), panel),
-                 m_redirect);
-
-    m_clientId = new QLineEdit(panel);
-    form->addRow(new TokenLabel(tr("Client id"), TokenLabel::Muted, Type::small(), panel),
-                 m_clientId);
-
-    m_clientSecret = new QLineEdit(panel);
-    m_clientSecret->setEchoMode(QLineEdit::Password);
-    form->addRow(new TokenLabel(tr("Client secret"), TokenLabel::Muted, Type::small(), panel),
-                 m_clientSecret);
-    column->addLayout(form);
-    column->addSpacing(18);
 
     auto *actions = new QHBoxLayout;
     actions->setSpacing(12);
-    auto *save = makePillButton(tr("Save client"), ButtonVariant::Default, Icons::Check, panel);
-    connect(save, &QPushButton::clicked, this, &SettingsPage::saveAniListClient);
-    actions->addWidget(save);
 
-    m_login = makePillButton(tr("Sign in to AniList"), ButtonVariant::Primary, Icons::User, panel);
+    m_login = makePillButton(tr("Sign in with AniList"), ButtonVariant::Primary, Icons::User, panel);
     connect(m_login, &QPushButton::clicked, this, &SettingsPage::startLogin);
     actions->addWidget(m_login);
+
+    m_signOut = makePillButton(tr("Sign out"), ButtonVariant::Quiet, Icons::Close, panel);
+    m_signOut->hide();
+    connect(m_signOut, &QPushButton::clicked, this, &SettingsPage::signOut);
+    actions->addWidget(m_signOut);
     actions->addStretch(1);
     column->addLayout(actions);
     column->addSpacing(14);
@@ -266,6 +241,82 @@ QWidget *SettingsPage::buildAccountPanel()
     m_loginStatus = new TokenLabel(QString(), TokenLabel::Muted, Type::small(), panel);
     m_loginStatus->setWordWrap(true);
     column->addWidget(m_loginStatus);
+    column->addSpacing(30);
+
+    // --- own client, folded away ---
+    // Almost nobody needs this: the build signs in with its own AniList client. It stays
+    // for people who would rather the token be issued to a client they control, and for
+    // forks that have not registered one.
+    m_advancedToggle = makePillButton(tr("Use my own AniList client"), ButtonVariant::Quiet,
+                                      Icons::ChevronDown, panel);
+    connect(m_advancedToggle, &QPushButton::clicked, this, [this] {
+        const bool show = !m_advanced->isVisible();
+        m_advanced->setVisible(show);
+        m_advancedToggle->setText(show ? tr("Hide client settings")
+                                       : tr("Use my own AniList client"));
+    });
+    column->addWidget(m_advancedToggle, 0, Qt::AlignLeft);
+    column->addSpacing(12);
+
+    m_advanced = new QWidget(panel);
+    m_advanced->hide();
+    auto *advancedColumn = new QVBoxLayout(m_advanced);
+    advancedColumn->setContentsMargins(0, 0, 0, 0);
+    advancedColumn->setSpacing(0);
+
+    auto *advancedNote = new TokenLabel(
+        tr("Create a client at anilist.co/settings/developer and set its redirect url to "
+           "exactly the value below. Leave the secret empty unless you want the stricter "
+           "authorization-code grant."),
+        TokenLabel::Muted, Type::small(), m_advanced);
+    advancedNote->setWordWrap(true);
+    advancedColumn->addWidget(advancedNote);
+    advancedColumn->addSpacing(12);
+
+    auto *openDeveloper = makePillButton(tr("Open AniList developer settings"),
+                                         ButtonVariant::Ghost, Icons::ExternalLink, m_advanced);
+    connect(openDeveloper, &QPushButton::clicked, this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://anilist.co/settings/developer")));
+    });
+    advancedColumn->addWidget(openDeveloper, 0, Qt::AlignLeft);
+    advancedColumn->addSpacing(18);
+
+    auto *form = new QFormLayout;
+    form->setSpacing(12);
+    form->setLabelAlignment(Qt::AlignLeft);
+
+    m_redirect = new TokenLabel(QString(), TokenLabel::Accent2, Type::body(), m_advanced);
+    m_redirect->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    form->addRow(new TokenLabel(tr("Redirect url"), TokenLabel::Muted, Type::small(), m_advanced),
+                 m_redirect);
+
+    m_clientId = new QLineEdit(m_advanced);
+    m_clientId->setPlaceholderText(tr("Client id"));
+    form->addRow(new TokenLabel(tr("Client id"), TokenLabel::Muted, Type::small(), m_advanced),
+                 m_clientId);
+
+    m_clientSecret = new QLineEdit(m_advanced);
+    m_clientSecret->setEchoMode(QLineEdit::Password);
+    m_clientSecret->setPlaceholderText(tr("Optional"));
+    form->addRow(new TokenLabel(tr("Client secret"), TokenLabel::Muted, Type::small(), m_advanced),
+                 m_clientSecret);
+    advancedColumn->addLayout(form);
+    advancedColumn->addSpacing(16);
+
+    auto *clientActions = new QHBoxLayout;
+    clientActions->setSpacing(12);
+    auto *save = makePillButton(tr("Save client"), ButtonVariant::Default, Icons::Check, m_advanced);
+    connect(save, &QPushButton::clicked, this, &SettingsPage::saveAniListClient);
+    clientActions->addWidget(save);
+
+    auto *clear = makePillButton(tr("Use the built-in client"), ButtonVariant::Quiet,
+                                 Icons::Refresh, m_advanced);
+    connect(clear, &QPushButton::clicked, this, &SettingsPage::clearAniListClient);
+    clientActions->addWidget(clear);
+    clientActions->addStretch(1);
+    advancedColumn->addLayout(clientActions);
+
+    column->addWidget(m_advanced);
     column->addStretch(1);
 
     return panel;
@@ -373,12 +424,32 @@ void SettingsPage::refreshAccountStatus()
 
                        const bool configured = status.value(QStringLiteral("configured")).toBool();
                        const bool loggedIn = status.value(QStringLiteral("loggedIn")).toBool();
+                       const bool ownClient = status.value(QStringLiteral("usesOwnClient")).toBool();
+
+                       if (ownClient && m_clientId->text().isEmpty()) {
+                           m_clientId->setText(status.value(QStringLiteral("clientId")).toString());
+                       }
 
                        m_login->setEnabled(configured && !loggedIn);
-                       m_loginStatus->setText(
-                           loggedIn    ? tr("Signed in.")
-                           : configured ? tr("Client saved. Sign in to link your account.")
-                                        : tr("Enter your client id and secret first."));
+                       m_signOut->setVisible(loggedIn);
+
+                       if (loggedIn) {
+                           m_loginStatus->setText(ownClient
+                               ? tr("Signed in through your own AniList client.")
+                               : tr("Signed in."));
+                       } else if (configured) {
+                           m_loginStatus->setText(ownClient
+                               ? tr("Ready. Sign-in will use your own AniList client.")
+                               : tr("Ready. Press the button and approve in your browser."));
+                       } else {
+                           // Only reachable in a build with no client id compiled in.
+                           m_loginStatus->setText(
+                               tr("This build has no AniList client id, so one-click sign-in is "
+                                  "unavailable. Add your own client below, or set "
+                                  "SAIKOU_ANILIST_CLIENT_ID."));
+                           m_advanced->show();
+                           m_advancedToggle->setText(tr("Hide client settings"));
+                       }
                    });
 }
 
@@ -435,6 +506,37 @@ void SettingsPage::saveAniListClient()
                    });
 }
 
+void SettingsPage::clearAniListClient()
+{
+    m_clientId->clear();
+    m_clientSecret->clear();
+    m_client->call(QStringLiteral("anilist.configure"),
+                   QJsonObject{{QStringLiteral("clientId"), QString()},
+                               {QStringLiteral("clientSecret"), QString()}},
+                   [this](const QJsonValue &, const RpcError *error) {
+                       if (error) {
+                           m_loginStatus->setText(error->message);
+                           return;
+                       }
+                       refreshAccountStatus();
+                       Q_EMIT statusMessage(tr("Using the built-in AniList client"), true);
+                   });
+}
+
+void SettingsPage::signOut()
+{
+    m_client->call(QStringLiteral("anilist.logout"),
+                   [this](const QJsonValue &, const RpcError *error) {
+                       if (error) {
+                           m_loginStatus->setText(error->message);
+                           return;
+                       }
+                       refreshAccountStatus();
+                       Q_EMIT accountChanged();
+                       Q_EMIT statusMessage(tr("Signed out of AniList"), true);
+                   });
+}
+
 void SettingsPage::startLogin()
 {
     m_login->setEnabled(false);
@@ -464,7 +566,10 @@ void SettingsPage::startLogin()
                                                                    .value(QStringLiteral("name"))
                                                                    .toString();
                                           m_loginStatus->setText(tr("Signed in as %1.").arg(name));
+                                          m_signOut->show();
+                                          m_login->setEnabled(false);
                                           Q_EMIT loggedIn();
+                                          Q_EMIT accountChanged();
                                       });
                    });
 }

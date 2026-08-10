@@ -167,10 +167,12 @@ void MainWindow::wirePages()
     });
 
     connect(m_settings, &SettingsPage::loggedIn, this, [this] {
+        toast(tr("Signed in"), tr("Your AniList lists are now available."));
+    });
+    connect(m_settings, &SettingsPage::accountChanged, this, [this] {
         refreshAccount();
         m_home->refresh();
         m_library->refresh();
-        toast(tr("Signed in"), tr("Your AniList lists are now available."));
     });
     connect(m_settings, &SettingsPage::backendChanged, this, [this] {
         toast(tr("Backend saved"), tr("Anime sources have been re-checked."));

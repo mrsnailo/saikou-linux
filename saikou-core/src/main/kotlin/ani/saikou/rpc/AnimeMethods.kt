@@ -115,20 +115,35 @@ private fun JsonElement?.parser(): AnimeParser {
     val obj = this as? JsonObject ?: throw RpcException(ErrorCodes.INVALID_PARAMS, "expected an object")
     val requested = obj["source"]?.jsonPrimitive?.content
 
-    if (!ApiBackend.isConfigured) {
+    val parser = if (requested.isNullOrBlank()) AnimeSources.default() else AnimeSources.get(requested)
+        ?: throw RpcException(
+            ErrorCodes.INVALID_PARAMS,
+            "Unknown source '$requested'. Known: ${AnimeSources.names().joinToString()}",
+        )
+
+    if (parser == null) {
         throw RpcException(
             ErrorCodes.CAPABILITY_MISSING,
-            "No anime backend is configured, so no sources are available. " +
-                "Set it in Settings, or with SAIKOU_API_HOST and SAIKOU_API_KEY.",
+            "No anime source is usable. The standalone source could not be created and the " +
+                "private backend API is not configured.",
             retryable = false,
         )
     }
 
-    val parser = if (requested.isNullOrBlank()) AnimeSources.default() else AnimeSources.get(requested)
-    return parser ?: throw RpcException(
-        ErrorCodes.INVALID_PARAMS,
-        "Unknown source '${requested ?: ""}'. Known: ${AnimeSources.names().joinToString()}",
-    )
+    // Only the API-backed sources need the private backend. Refusing every call whenever it
+    // is unset — which is the normal state — is what made a fresh install unable to play
+    // anything at all, including through AllAnime, which needs no backend.
+    if (!AnimeSources.isStandalone(parser.name) && !ApiBackend.isConfigured) {
+        throw RpcException(
+            ErrorCodes.CAPABILITY_MISSING,
+            "${parser.name} needs the private backend API, which is not configured. " +
+                "Set it in Settings → Sources, or pick AllAnime, which needs no backend.",
+            source = parser.name,
+            retryable = false,
+        )
+    }
+
+    return parser
 }
 
 // `obj()` and `string()` are the shared helpers declared in AniListMethods.kt.
