@@ -44,6 +44,11 @@ sudo pacman -S --needed qt6-base mpv jdk21-openjdk cmake ninja base-devel
 ./scripts/install-local.sh
 ```
 
+`jdk21-openjdk`, not `jdk-openjdk`: the core targets Java 21, and Arch's unversioned JDK
+tracks whatever release is newest — often ahead of what Gradle supports, which fails the
+build before it reaches a task. If 21 is not installed, Gradle provisions it itself
+through the toolchain resolver, at the cost of a download.
+
 That installs into `~/.local` without root. To build a package instead, use
 `packaging/release/PKGBUILD` with a source tarball, or `packaging/PKGBUILD` for an
 AUR-style build straight from git.

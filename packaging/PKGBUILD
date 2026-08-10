@@ -7,9 +7,14 @@ arch=('x86_64')
 url="https://github.com/mrsnailo/saikou-linux"
 license=('GPL-3.0-or-later')
 
-# jre-openjdk is a runtime dependency: the scraping core is a JVM daemon the UI spawns.
-depends=('qt6-base' 'mpv' 'jre-openjdk' 'hicolor-icon-theme')
-makedepends=('cmake' 'ninja' 'jdk-openjdk' 'git')
+# A JVM is a runtime dependency: the scraping core is a JVM daemon the UI spawns. Asking
+# for the provides name rather than jre-openjdk lets any installed JDK satisfy it, instead
+# of making pacman swap a developer's jdk-openjdk out for a jre on every install.
+depends=('qt6-base' 'mpv' 'java-runtime>=21' 'hicolor-icon-theme')
+# jdk21-openjdk, not jdk-openjdk: the build targets 21, and Arch's unversioned JDK runs
+# ahead of what Gradle supports often enough that pinning is the difference between a
+# package that builds and one that fails on "What went wrong: <version>".
+makedepends=('cmake' 'ninja' 'jdk21-openjdk' 'git')
 # Kvantum is honoured when present ("Follow system" in Settings), and Outfit is the
 # typeface the interface is designed in; neither is required to run.
 optdepends=('kvantum: theme Saikou with the rest of your Qt desktop'
@@ -31,6 +36,10 @@ build() {
     # Gradle must not touch the network cache outside the build dir, and makepkg builds
     # offline-hostile setups fail loudly rather than silently using $HOME.
     export GRADLE_USER_HOME="$srcdir/.gradle"
+    # Run Gradle on the JDK the build targets. Without this it inherits whatever
+    # /usr/lib/jvm/default points at, which on Arch is the newest JDK released — and a
+    # Gradle that predates that JDK aborts before it reaches a single task.
+    export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
     ./gradlew :saikou-core:installDist --no-daemon
 
     cmake -S saikou-ui -B build -G Ninja \

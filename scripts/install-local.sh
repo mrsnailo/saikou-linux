@@ -26,6 +26,17 @@ if (( ${#missing[@]} )); then
     exit 1
 fi
 
+# Build on the JDK the core targets when it is installed. Arch's default JDK tracks the
+# newest release, and a Gradle that predates it aborts on the version string alone; the
+# toolchain resolver in settings.gradle.kts covers the case where 21 is absent.
+for candidate in /usr/lib/jvm/java-21-openjdk /usr/lib/jvm/java-21-openjdk-amd64; do
+    if [[ -x "$candidate/bin/java" ]]; then
+        export JAVA_HOME="$candidate"
+        say "Building with $JAVA_HOME"
+        break
+    fi
+done
+
 say "Building the core daemon"
 "$root/gradlew" :saikou-core:installDist --no-daemon -q
 
