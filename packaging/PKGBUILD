@@ -10,6 +10,10 @@ license=('GPL-3.0-or-later')
 # jre-openjdk is a runtime dependency: the scraping core is a JVM daemon the UI spawns.
 depends=('qt6-base' 'mpv' 'jre-openjdk' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'jdk-openjdk' 'git')
+# Kvantum is honoured when present ("Follow system" in Settings), and Outfit is the
+# typeface the interface is designed in; neither is required to run.
+optdepends=('kvantum: theme Saikou with the rest of your Qt desktop'
+            'ttf-outfit: the typeface the interface is designed in')
 provides=('saikou-linux')
 conflicts=('saikou-linux')
 

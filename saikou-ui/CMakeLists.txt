@@ -39,14 +39,59 @@ add_executable(saikou-ui
     src/ImageLoader.h
     src/MainWindow.cpp
     src/MainWindow.h
-    src/MediaGrid.cpp
-    src/MediaGrid.h
     src/MpvWidget.cpp
     src/MpvWidget.h
     src/PlayerWindow.cpp
     src/PlayerWindow.h
-    src/SettingsDialog.cpp
-    src/SettingsDialog.h
+
+    src/model/Media.cpp
+    src/model/Media.h
+    src/model/View.h
+
+    src/theme/Icons.cpp
+    src/theme/Icons.h
+    src/theme/Theme.cpp
+    src/theme/Theme.h
+    src/theme/Type.cpp
+    src/theme/Type.h
+
+    src/widgets/Controls.cpp
+    src/widgets/Controls.h
+    src/widgets/DetailWidgets.cpp
+    src/widgets/DetailWidgets.h
+    src/widgets/FlowLayout.cpp
+    src/widgets/FlowLayout.h
+    src/widgets/HeroBanner.cpp
+    src/widgets/HeroBanner.h
+    src/widgets/MediaViews.cpp
+    src/widgets/MediaViews.h
+    src/widgets/PosterCard.cpp
+    src/widgets/PosterCard.h
+    src/widgets/SideBar.cpp
+    src/widgets/SideBar.h
+    src/widgets/StateView.cpp
+    src/widgets/StateView.h
+    src/widgets/ToastHost.cpp
+    src/widgets/ToastHost.h
+    src/widgets/TopBar.cpp
+    src/widgets/TopBar.h
+
+    src/pages/BrowsePage.cpp
+    src/pages/BrowsePage.h
+    src/pages/CalendarPage.cpp
+    src/pages/CalendarPage.h
+    src/pages/DownloadsPage.cpp
+    src/pages/DownloadsPage.h
+    src/pages/GenresPage.cpp
+    src/pages/GenresPage.h
+    src/pages/HomePage.cpp
+    src/pages/HomePage.h
+    src/pages/LibraryPage.cpp
+    src/pages/LibraryPage.h
+    src/pages/ScrollPage.cpp
+    src/pages/ScrollPage.h
+    src/pages/SettingsPage.cpp
+    src/pages/SettingsPage.h
 )
 
 target_link_libraries(saikou-ui PRIVATE

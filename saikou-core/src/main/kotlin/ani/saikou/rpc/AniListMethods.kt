@@ -96,6 +96,58 @@ fun Registry.registerAniListMethods() {
         ).page()
     }
 
+    /**
+     * The filtered browse query behind the Browse screen. Absent filters are left out of
+     * the variables map rather than sent as null, so AniList treats them as unset.
+     */
+    register("anilist.browse") { params, _ ->
+        val obj = (params as? JsonObject) ?: JsonObject(emptyMap())
+        AniList.query(
+            Queries.BROWSE,
+            buildJsonObject {
+                put("page", params.intOr("page", 1))
+                put("perPage", params.intOr("perPage", 40))
+                obj["search"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { put("search", it) }
+                obj["genres"]?.let { genres ->
+                    val list = genres as? JsonArray ?: buildJsonArray { add(genres) }
+                    if (list.isNotEmpty()) put("genres", list)
+                }
+                obj["sort"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let {
+                    put("sort", buildJsonArray { add(JsonPrimitive(it)) })
+                }
+                obj["format"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { put("format", it) }
+                obj["status"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { put("status", it) }
+                obj["season"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { season ->
+                    put("season", season)
+                    put("seasonYear", params.intOr("seasonYear", LocalDate.now().year))
+                }
+            },
+        ).page()
+    }
+
+    /** AniList's canonical genre list, so the Genres screen is never out of date. */
+    register("anilist.genres") { _, _ ->
+        AniList.query(Queries.GENRES)["GenreCollection"] ?: JsonArray(emptyList())
+    }
+
+    /**
+     * Airing schedule for a window of days. Defaults to the seven days starting today,
+     * which is exactly what the Calendar screen shows.
+     */
+    register("anilist.airing") { params, _ ->
+        val days = params.intOr("days", 7).coerceIn(1, 14)
+        val start = params.intOr("start", (System.currentTimeMillis() / 1000).toInt())
+        AniList.query(
+            Queries.AIRING,
+            buildJsonObject {
+                put("start", start - 1)
+                put("end", start + days * 86_400)
+                put("page", params.intOr("page", 1))
+                put("perPage", params.intOr("perPage", 50))
+            },
+        ).page()
+    }
+
     register("anilist.media") { params, _ ->
         AniList.query(
             Queries.MEDIA,

@@ -16,6 +16,10 @@ depends=('qt6-base' 'mpv' 'java-runtime>=21' 'hicolor-icon-theme')
 # The build JDK is pinned rather than virtual: Arch's default JDK runs ahead of what the
 # Gradle wrapper understands, and Gradle fails on the version string alone.
 makedepends=('cmake' 'ninja' 'jdk21-openjdk')
+# Kvantum is honoured when present ("Follow system" in Settings), and Outfit is the
+# typeface the interface is designed in; neither is required to run.
+optdepends=('kvantum: theme Saikou with the rest of your Qt desktop'
+            'ttf-outfit: the typeface the interface is designed in')
 options=('!debug' '!strip')
 
 source=("$pkgname-$pkgver.tar.gz")
