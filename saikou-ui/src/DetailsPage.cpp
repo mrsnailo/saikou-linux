@@ -368,9 +368,17 @@ void DetailsPage::showMedia(const QJsonObject &media)
     m_banner->setImageUrl(m_media.bannerUrl.isEmpty() ? m_media.coverUrl : m_media.bannerUrl);
 
     // --- genre tags ---
-    qDeleteAll(m_tagRow->findChildren<Tag *>(QString(), Qt::FindDirectChildrenOnly));
-    for (const QString &genre : m_media.genres) {
-        m_tagRow->layout()->addWidget(new Tag(genre, m_tagRow));
+    // Emptied through the layout rather than findChildren<Tag *>(): that template asserts
+    // the type carries Q_OBJECT, which a paint-only helper class has no reason to, and the
+    // layout is the authority on what is in the row anyway.
+    if (QLayout *tags = m_tagRow->layout()) {
+        while (QLayoutItem *item = tags->takeAt(0)) {
+            delete item->widget();
+            delete item;
+        }
+        for (const QString &genre : m_media.genres) {
+            tags->addWidget(new Tag(genre, m_tagRow));
+        }
     }
 
     updateMetaTable();
