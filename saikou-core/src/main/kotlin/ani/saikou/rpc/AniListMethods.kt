@@ -22,6 +22,7 @@ fun Registry.registerAniListMethods() {
             put("configured", Auth.isConfigured)
             put("loggedIn", Auth.isLoggedIn)
             put("usesOwnClient", Auth.usesOwnClient)
+            put("hasBundledClient", Auth.hasBundledClient)
             put("clientId", Auth.clientId ?: "")
             put("redirectUri", Auth.redirectUri)
             put("developerUrl", "https://anilist.co/settings/developer")
@@ -44,6 +45,7 @@ fun Registry.registerAniListMethods() {
             put("redirectUri", Auth.redirectUri)
             put("configured", Auth.isConfigured)
             put("usesOwnClient", Auth.usesOwnClient)
+            put("hasBundledClient", Auth.hasBundledClient)
         }
     }
 

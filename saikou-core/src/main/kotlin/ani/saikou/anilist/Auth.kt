@@ -24,34 +24,20 @@ import kotlin.io.path.readText
 /**
  * AniList sign-in: press one button, approve in the browser, done.
  *
- * The Android app uses the implicit grant, which returns the token in the URL *fragment*.
- * A fragment never reaches a server, which is why this used to fall back to the code grant
- * and make every user register their own API client just to log in. Instead the loopback
- * listener now answers the redirect with a page whose only job is to hand `location.hash`
- * straight back to `/callback/token`, so the implicit grant works on the desktop too — no
- * client secret, and nothing for the user to create or paste.
+ * Only the authorization-code grant is available. AniList answers `response_type=token`
+ * with `unsupported_grant_type`, and its token endpoint answers `invalid_client` when the
+ * request carries no secret — so the implicit grant and PKCE are both off the table, and
+ * signing in means holding a client id *and* secret.
  *
- * [DEFAULT_CLIENT_ID] is the application's own registered client. A user can still point
- * Saikou at a client of their own (see [configure]); supplying a secret alongside it
- * switches back to the code grant, which is the stricter of the two.
+ * Those come from [BundledClient], written at build time from the environment and never
+ * committed. A build without them still signs in, but the user has to supply a client of
+ * their own first (see [configure]).
  */
 object Auth {
     private const val TAG = "AniListAuth"
 
-    /**
-     * The AniList API client this build signs in with. It has to be registered at
-     * https://anilist.co/settings/developer with the redirect url `http://localhost:8998/callback`.
-     * A client id is public by design — the implicit grant carries no secret — so shipping
-     * it is how the one-click flow is possible at all.
-     *
-     * Overridable at runtime with SAIKOU_ANILIST_CLIENT_ID, which is also how a fork avoids
-     * having to patch this constant.
-     */
-    const val DEFAULT_CLIENT_ID = "48249"
-
     const val DEFAULT_PORT = 8998
     const val CALLBACK_PATH = "/callback"
-    private const val TOKEN_PATH = "/callback/token"
 
     private const val CLIENT_ID_KEY = "anilist.clientId"
     private const val CLIENT_SECRET_KEY = "anilist.clientSecret"
@@ -63,33 +49,54 @@ object Auth {
     var token: String? = null
         private set
 
-    /** The client the user supplied, if any. */
-    private val ownClientId: String?
-        get() = Preferences.get(CLIENT_ID_KEY)?.jsonPrimitive?.contentOrNull()
+    /** An id and its matching secret. The two are never mixed across sources. */
+    private data class Client(val id: String, val secret: String)
 
-    val clientId: String?
-        get() = ownClientId
-            ?: System.getenv("SAIKOU_ANILIST_CLIENT_ID")?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_CLIENT_ID.takeIf { it.isNotBlank() }
+    private val ownClient: Client?
+        get() {
+            val id = Preferences.get(CLIENT_ID_KEY)?.jsonPrimitive?.contentOrNull() ?: return null
+            val secret = Preferences.get(CLIENT_SECRET_KEY)?.jsonPrimitive?.contentOrNull() ?: return null
+            return Client(id, secret)
+        }
 
-    val clientSecret: String? get() = Preferences.get(CLIENT_SECRET_KEY)?.jsonPrimitive?.contentOrNull()
+    /**
+     * The user's client wins over the built-in one, and the pair is taken whole: pairing a
+     * user's id with the bundled secret would authenticate as neither client.
+     */
+    private val activeClient: Client?
+        get() = ownClient
+            ?: environmentClient()
+            ?: Client(BundledClient.ID, BundledClient.SECRET).takeIf {
+                it.id.isNotBlank() && it.secret.isNotBlank()
+            }
+
+    private fun environmentClient(): Client? {
+        val id = System.getenv("SAIKOU_ANILIST_CLIENT_ID")?.takeIf { it.isNotBlank() } ?: return null
+        val secret = System.getenv("SAIKOU_ANILIST_CLIENT_SECRET")?.takeIf { it.isNotBlank() } ?: return null
+        return Client(id, secret)
+    }
+
+    val clientId: String? get() = activeClient?.id
 
     val port: Int get() = Preferences.get(PORT_KEY)?.jsonPrimitive?.contentOrNull()?.toIntOrNull() ?: DEFAULT_PORT
 
     val redirectUri: String get() = "http://localhost:$port$CALLBACK_PATH"
 
     /** True when a sign-in can be started at all. */
-    val isConfigured: Boolean get() = !clientId.isNullOrBlank()
+    val isConfigured: Boolean get() = activeClient != null
 
     /** True when the user pointed Saikou at their own AniList client instead of this build's. */
-    val usesOwnClient: Boolean get() = !ownClientId.isNullOrBlank()
+    val usesOwnClient: Boolean get() = ownClient != null
+
+    /** True when this build carries a client of its own, so the user needs to supply nothing. */
+    val hasBundledClient: Boolean get() = BundledClient.ID.isNotBlank() && BundledClient.SECRET.isNotBlank()
 
     val isLoggedIn: Boolean get() = token != null
 
     /**
-     * Points sign-in at a client of the user's own. A blank id clears it and returns to the
-     * built-in client. The secret is optional: with one, the stricter code grant is used;
-     * without, the same implicit grant as the built-in client.
+     * Points sign-in at a client of the user's own. Both values are required — AniList
+     * rejects a token request without a secret — and blanking either returns to the
+     * built-in client.
      */
     fun configure(clientId: String, clientSecret: String, port: Int?) {
         Preferences.set(CLIENT_ID_KEY, clientId.trim().takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) })
@@ -109,10 +116,9 @@ object Auth {
 
     /** The url the UI opens in the user's browser. */
     fun authorizeUrl(): String {
-        val id = clientId ?: throw noClientError()
-        val responseType = if (clientSecret.isNullOrBlank()) "token" else "code"
+        val client = activeClient ?: throw noClientError()
         return "https://anilist.co/api/v2/oauth/authorize" +
-            "?client_id=$id&redirect_uri=$redirectUri&response_type=$responseType"
+            "?client_id=${client.id}&redirect_uri=$redirectUri&response_type=code"
     }
 
     /**
@@ -122,8 +128,8 @@ object Auth {
     suspend fun awaitLogin(timeoutSeconds: Long = 300): String {
         if (!isConfigured) throw noClientError()
 
-        val implicit = clientSecret.isNullOrBlank()
-        val result = CompletableFuture<String>()
+        val client = activeClient ?: throw noClientError()
+        val code = CompletableFuture<String>()
 
         val server = try {
             HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
@@ -136,48 +142,32 @@ object Auth {
             )
         }
 
-        // The implicit grant lands here with the token in the fragment, which the browser
-        // keeps to itself — so this reply is a page that reads the fragment and calls back.
         server.createContext(CALLBACK_PATH) { exchange ->
             val params = parseQuery(exchange.requestURI.rawQuery)
             when {
                 params["code"] != null -> {
-                    result.complete(params.getValue("code"))
+                    code.complete(params.getValue("code"))
                     exchange.reply(page("Signed in", "You can close this tab and go back to Saikou."))
                 }
 
                 params["error"] != null -> {
-                    result.completeExceptionally(IllegalStateException(params.getValue("error")))
-                    exchange.reply(page("Sign-in failed", params.getValue("error")))
+                    val message = params["error_description"] ?: params.getValue("error")
+                    code.completeExceptionally(IllegalStateException(message))
+                    exchange.reply(page("Sign-in failed", message))
                 }
 
-                implicit -> exchange.reply(fragmentRelayPage())
-
                 else -> {
-                    result.completeExceptionally(IllegalStateException("no authorization code returned"))
+                    code.completeExceptionally(IllegalStateException("no authorization code returned"))
                     exchange.reply(page("Sign-in failed", "AniList did not return an authorization code."))
                 }
             }
         }
 
-        server.createContext(TOKEN_PATH) { exchange ->
-            val params = parseQuery(exchange.requestURI.rawQuery)
-            val accessToken = params["access_token"]
-            if (accessToken != null) {
-                result.complete(accessToken)
-                exchange.reply(page("Signed in", "You can close this tab and go back to Saikou."))
-            } else {
-                val error = params["error_description"] ?: params["error"] ?: "no token returned"
-                result.completeExceptionally(IllegalStateException(error))
-                exchange.reply(page("Sign-in failed", error))
-            }
-        }
-
         server.start()
-        Log.i(TAG, "waiting for AniList redirect on $redirectUri (${if (implicit) "implicit" else "code"} grant)")
+        Log.i(TAG, "waiting for AniList redirect on $redirectUri")
 
-        val value = try {
-            result.get(timeoutSeconds, TimeUnit.SECONDS)
+        val authorizationCode = try {
+            code.get(timeoutSeconds, TimeUnit.SECONDS)
         } catch (e: Exception) {
             throw RpcException(
                 ErrorCodes.NOT_AUTHENTICATED,
@@ -190,29 +180,24 @@ object Auth {
             server.stop(1)
         }
 
-        return if (implicit) {
-            store(value)
-            Log.i(TAG, "AniList sign-in complete")
-            value
-        } else {
-            exchangeCode(value)
-        }
+        return exchangeCode(client, authorizationCode)
     }
 
     private fun noClientError() = RpcException(
         ErrorCodes.NOT_AUTHENTICATED,
-        "This build has no AniList client id compiled in, so one-click sign-in is unavailable. " +
-            "Set SAIKOU_ANILIST_CLIENT_ID, or add your own client under Settings → Account.",
+        "This build carries no AniList client, so one-click sign-in is unavailable. Add your " +
+            "own client id and secret under Settings → Account, or set " +
+            "SAIKOU_ANILIST_CLIENT_ID and SAIKOU_ANILIST_CLIENT_SECRET.",
     )
 
-    private suspend fun exchangeCode(code: String): String {
+    private suspend fun exchangeCode(client: Client, code: String): String {
         val response = Http.post(
             "https://anilist.co/api/v2/oauth/token",
             headers = mapOf("Accept" to "application/json"),
             data = mapOf(
                 "grant_type" to "authorization_code",
-                "client_id" to clientId.orEmpty(),
-                "client_secret" to clientSecret.orEmpty(),
+                "client_id" to client.id,
+                "client_secret" to client.secret,
                 "redirect_uri" to redirectUri,
                 "code" to code,
             ),
@@ -258,25 +243,6 @@ object Auth {
                 URLDecoder.decode(parts[0], "utf-8") to URLDecoder.decode(parts[1], "utf-8")
             } else null
         }.toMap()
-
-    /**
-     * The whole reason the implicit grant works here: this page runs in the browser, where
-     * the fragment *is* readable, and immediately re-requests the same loopback server with
-     * those values as an ordinary query string.
-     */
-    private fun fragmentRelayPage() = """
-        <!doctype html>
-        <html><head><meta charset="utf-8"><title>Signing in…</title>
-        $STYLE
-        <script>
-          (function () {
-            var hash = window.location.hash.replace(/^#/, "");
-            window.location.replace("$TOKEN_PATH?" + (hash || "error=no_fragment_returned"));
-          })();
-        </script>
-        </head>
-        <body><div><h1>Signing in…</h1><p>Handing your AniList token back to Saikou.</p></div></body></html>
-    """.trimIndent()
 
     private fun page(title: String, message: String) = """
         <!doctype html>

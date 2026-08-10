@@ -266,8 +266,8 @@ QWidget *SettingsPage::buildAccountPanel()
 
     auto *advancedNote = new TokenLabel(
         tr("Create a client at anilist.co/settings/developer and set its redirect url to "
-           "exactly the value below. Leave the secret empty unless you want the stricter "
-           "authorization-code grant."),
+           "exactly the value below. AniList issues tokens only through the "
+           "authorization-code grant, so both the id and the secret are required."),
         TokenLabel::Muted, Type::small(), m_advanced);
     advancedNote->setWordWrap(true);
     advancedColumn->addWidget(advancedNote);
@@ -297,7 +297,7 @@ QWidget *SettingsPage::buildAccountPanel()
 
     m_clientSecret = new QLineEdit(m_advanced);
     m_clientSecret->setEchoMode(QLineEdit::Password);
-    m_clientSecret->setPlaceholderText(tr("Optional"));
+    m_clientSecret->setPlaceholderText(tr("Required"));
     form->addRow(new TokenLabel(tr("Client secret"), TokenLabel::Muted, Type::small(), m_advanced),
                  m_clientSecret);
     advancedColumn->addLayout(form);
@@ -442,11 +442,11 @@ void SettingsPage::refreshAccountStatus()
                                ? tr("Ready. Sign-in will use your own AniList client.")
                                : tr("Ready. Press the button and approve in your browser."));
                        } else {
-                           // Only reachable in a build with no client id compiled in.
+                           // Only reachable in a build with no client compiled in — a local
+                           // build, or a fork without the release secrets.
                            m_loginStatus->setText(
-                               tr("This build has no AniList client id, so one-click sign-in is "
-                                  "unavailable. Add your own client below, or set "
-                                  "SAIKOU_ANILIST_CLIENT_ID."));
+                               tr("This build carries no AniList client, so one-click sign-in "
+                                  "is unavailable. Add your own client id and secret below."));
                            m_advanced->show();
                            m_advancedToggle->setText(tr("Hide client settings"));
                        }

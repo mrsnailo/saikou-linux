@@ -31,6 +31,10 @@ build() {
     # Keep Gradle's cache inside the build dir; makepkg builds must not write to $HOME.
     export GRADLE_USER_HOME="$srcdir/.gradle"
     export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+    # Optional: compiles the app's AniList client into the core so sign-in is one click.
+    # Unset simply means sign-in asks the user for a client of their own.
+    export SAIKOU_ANILIST_CLIENT_ID="${SAIKOU_ANILIST_CLIENT_ID:-}"
+    export SAIKOU_ANILIST_CLIENT_SECRET="${SAIKOU_ANILIST_CLIENT_SECRET:-}"
     ./gradlew :saikou-core:installDist --no-daemon --console=plain
 
     cmake -S saikou-ui -B build -G Ninja \

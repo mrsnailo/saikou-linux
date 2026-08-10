@@ -40,6 +40,10 @@ build() {
     # /usr/lib/jvm/default points at, which on Arch is the newest JDK released — and a
     # Gradle that predates that JDK aborts before it reaches a single task.
     export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+    # Optional: compiles the app's AniList client into the core so sign-in is one click.
+    # Unset simply means sign-in asks the user for a client of their own.
+    export SAIKOU_ANILIST_CLIENT_ID="${SAIKOU_ANILIST_CLIENT_ID:-}"
+    export SAIKOU_ANILIST_CLIENT_SECRET="${SAIKOU_ANILIST_CLIENT_SECRET:-}"
     ./gradlew :saikou-core:installDist --no-daemon
 
     cmake -S saikou-ui -B build -G Ninja \

@@ -44,6 +44,10 @@ jobs:
       - name: Build the package
         env:
           VERSION: ${{ steps.version.outputs.value }}
+          # Compiled into the core so released builds sign in with one click. Absent on a
+          # fork without the secrets set, which only means sign-in asks for a client.
+          SAIKOU_ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+          SAIKOU_ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
         run: |
           # makepkg refuses to run as root, so the build happens as an unprivileged user.
           useradd -m builder
@@ -56,7 +60,12 @@ jobs:
           sed "s/^pkgver=.*/pkgver=$VERSION/" packaging/release/PKGBUILD > "$workdir/PKGBUILD"
 
           chown -R builder "$workdir"
-          su builder -c "cd $workdir && makepkg -f --noconfirm"
+          # makepkg runs as another user, so the client has to be handed over explicitly;
+          # `su` does not carry the environment across.
+          su builder -c "cd $workdir && \
+            SAIKOU_ANILIST_CLIENT_ID='$SAIKOU_ANILIST_CLIENT_ID' \
+            SAIKOU_ANILIST_CLIENT_SECRET='$SAIKOU_ANILIST_CLIENT_SECRET' \
+            makepkg -f --noconfirm"
 
           mkdir -p dist
           cp "$workdir"/*.pkg.tar.zst dist/

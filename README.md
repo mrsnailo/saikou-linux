@@ -58,18 +58,24 @@ AUR-style build straight from git.
 **Settings → Account → Sign in with AniList.** Your browser opens, you approve, and the
 tab hands the token back. Nothing to create, nothing to paste.
 
-That works through the implicit grant, which returns the token in the URL *fragment* —
-something a loopback listener never receives. Saikou's listener answers the redirect with
-a page whose only job is to read `location.hash` and call the listener back with it, so no
-client secret is involved at any point.
+That needs the app to hold an AniList client id **and** secret. AniList rejects
+`response_type=token` with `unsupported_grant_type` and answers `invalid_client` for a
+token request without a secret, so the authorization-code grant is the only one available
+and PKCE is not an alternative.
 
-The client id this build signs in with is `Auth.DEFAULT_CLIENT_ID` in
-`saikou-core/src/main/kotlin/ani/saikou/anilist/Auth.kt`, overridable at runtime with
-`SAIKOU_ANILIST_CLIENT_ID`. A client id is public by design under the implicit grant.
+The client is therefore **injected at build time and never committed**:
 
-If you would rather the token be issued to a client you control, **Use my own AniList
-client** under the same panel takes a client id (and, optionally, a secret — supplying one
-switches to the stricter authorization-code grant). Register it at
+```sh
+SAIKOU_ANILIST_CLIENT_ID=… SAIKOU_ANILIST_CLIENT_SECRET=… ./scripts/install-local.sh
+```
+
+Gradle writes it into a generated `BundledClient.kt`; the equivalent Gradle properties are
+`saikou.anilist.clientId` and `saikou.anilist.clientSecret`. Release builds get it from the
+`ANILIST_CLIENT_ID` / `ANILIST_CLIENT_SECRET` repository secrets. The daemon also reads the
+same two environment variables at runtime.
+
+A build without them still works — sign-in then asks for a client of your own. **Use my own
+AniList client** in the same panel takes an id and secret; register the client at
 <https://anilist.co/settings/developer> with the redirect url `http://localhost:8998/callback`.
 
 Progress syncs automatically once you pass 85% of an episode.
