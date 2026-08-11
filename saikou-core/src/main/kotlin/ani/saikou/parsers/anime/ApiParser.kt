@@ -180,11 +180,8 @@ class Anikoto : ApiParser() {
     override val shape = Shape.GROUPED_SERVERS
 }
 
-class AniBD : ApiParser() {
-    override val name = "AniBD"
-    override val providerName = "anibd"
-    override val shape = Shape.SINGLE_SERVER
-}
+// AniBD used to live here. Its site turned out to expose the same API the backend was
+// proxying, so it is now a standalone parser in AniBD.kt.
 
 class Anizone : ApiParser() {
     override val name = "Anizone"

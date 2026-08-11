@@ -20,9 +20,10 @@ import ani.saikou.parsers.anime.Anizone
  * fail when clicked.
  *
  * Order matters: [default] takes the first usable entry, so the standalone sources that
- * actually resolve come first — KickAssAnime ahead of AnimeHeaven because it serves HLS
- * with subtitle tracks rather than a bare MP4. AllAnime is kept below both because its API
- * sits behind a Cloudflare challenge that many connections do not pass.
+ * actually resolve come first. AniBD leads because it is keyed by AniList id and needs no
+ * title matching at all, then KickAssAnime, then AnimeHeaven, which serves a bare MP4.
+ * AllAnime is kept below all three because its API sits behind a Cloudflare challenge that
+ * many connections do not pass.
  */
 object AnimeSources {
     private data class Entry(
@@ -33,11 +34,11 @@ object AnimeSources {
     )
 
     private val entries: List<Entry> = listOf(
+        Entry("AniBD", ::AniBD, standalone = true),
         Entry("KickAssAnime", ::KickAssAnime, standalone = true),
         Entry("AnimeHeaven", ::AnimeHeaven, standalone = true),
         Entry("AllAnime", ::AllAnime, standalone = true),
         Entry("Anikoto", ::Anikoto, standalone = false),
-        Entry("AniBD", ::AniBD, standalone = false),
         Entry("Anizone", ::Anizone, standalone = false),
         Entry("AniDB", ::AniDB, standalone = false),
         Entry("AnimePahe", ::AnimePahe, standalone = false),
@@ -45,7 +46,13 @@ object AnimeSources {
 
     private val instances = mutableMapOf<String, AnimeParser>()
 
-    data class Availability(val name: String, val enabled: Boolean, val reason: String?)
+    data class Availability(
+        val name: String,
+        val enabled: Boolean,
+        val reason: String?,
+        /** See [AnimeParser.anilistKeyed]; lets the UI skip the title guess. */
+        val anilistKeyed: Boolean = false,
+    )
 
     @Synchronized
     fun get(name: String): AnimeParser? {
@@ -67,6 +74,9 @@ object AnimeSources {
             Availability(
                 name = entry.name,
                 enabled = enabled,
+                // Only ask an enabled source about itself: instantiating one that cannot
+                // run yet is pointless work on a screen that is only listing names.
+                anilistKeyed = enabled && get(entry.name)?.anilistKeyed == true,
                 reason = if (enabled) {
                     null
                 } else {

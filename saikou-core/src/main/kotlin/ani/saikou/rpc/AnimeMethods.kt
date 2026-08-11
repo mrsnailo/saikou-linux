@@ -21,6 +21,7 @@ fun Registry.registerAnimeMethods() {
                 add(buildJsonObject {
                     put("name", source.name)
                     put("enabled", source.enabled)
+                    put("anilistKeyed", source.anilistKeyed)
                     source.reason?.let { put("reason", it) }
                 })
             }
