@@ -150,10 +150,16 @@ jobs:
           SH
           chmod +x AppDir/AppRun
 
-          wget -qO /usr/local/bin/linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -qO /usr/local/bin/linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          wget -qO /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x /usr/local/bin/linuxdeploy /usr/local/bin/linuxdeploy-plugin-qt /usr/local/bin/appimagetool
+          # Kept in the workspace rather than /usr/local/bin, which is root-owned on the
+          # runners. The directory goes on PATH for later steps because `--plugin qt`
+          # resolves linuxdeploy-plugin-qt by name.
+          mkdir -p "$PWD/tools"
+          wget -qO tools/linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -qO tools/linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          wget -qO tools/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x tools/*
+          echo "$PWD/tools" >> "$GITHUB_PATH"
+          export PATH="$PWD/tools:$PATH"
 
           # The runners have no FUSE device, so these tools cannot mount themselves; this
           # makes every AppImage unpack to a temp dir and run from there instead.
