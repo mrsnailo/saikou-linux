@@ -92,7 +92,9 @@ void Theme::install()
     QApplication::setFont(base);
 
     QSettings settings;
-    m_mode = static_cast<Mode>(settings.value(QStringLiteral("ui/theme"), Dark).toInt());
+    // Anything that is not System — including 1, the light theme that used to exist — is
+    // the brand theme, so an old config cannot leave the app in a mode it no longer has.
+    m_mode = settings.value(QStringLiteral("ui/theme"), Dark).toInt() == System ? System : Dark;
     apply();
 }
 
@@ -174,20 +176,7 @@ void Theme::apply()
 
 void Theme::loadBrandTokens()
 {
-    Tokens t;  // defaults are the dark brand palette
-    if (m_mode == Light) {
-        t.bg = QColor("#FAFAFA");
-        t.surface = QColor("#FFFFFF");
-        t.card = QColor("#F1F1F4");
-        t.cardHi = QColor("#E7E7EC");
-        t.border = QColor("#DCDCE1");
-        t.fg = QColor("#121214");
-        t.muted = QColor("#66666B");
-        t.disabled = QColor("#A6A6AC");
-        t.accent2 = QColor("#5A67D8");
-        t.accent2Dim = QColor("#A7AEE8");
-        t.isDark = false;
-    }
+    Tokens t;  // the defaults are the brand palette, and it is the only branded one
     t.gutter = m_tokens.gutter;
     t.sidebarWidth = m_tokens.sidebarWidth;
     t.railGap = m_tokens.railGap;

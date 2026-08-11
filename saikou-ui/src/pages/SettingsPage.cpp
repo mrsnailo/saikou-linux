@@ -149,7 +149,6 @@ QWidget *SettingsPage::buildAppearancePanel()
     auto *flow = new FlowLayout(chips);
     const QVector<QPair<QString, int>> modes{
         {tr("Saikou Dark"), Theme::Dark},
-        {tr("Saikou Light"), Theme::Light},
         {tr("Follow system"), Theme::System},
     };
     for (const auto &mode : modes) {

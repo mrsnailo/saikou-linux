@@ -63,10 +63,17 @@ class Theme : public QObject
     Q_OBJECT
 
 public:
+    /**
+     * There is deliberately no light brand theme. The design is drawn against black
+     * surfaces and the light palette did not survive contact with it. Anyone who wants a
+     * light interface gets a real one through [System], drawn by their platform style.
+     *
+     * The values are explicit because they are persisted: 1 was the old light mode, and
+     * [install] maps it back to [Dark] rather than letting it read as something else.
+     */
     enum Mode {
-        Dark,    ///< Saikou brand palette, dark. The default and the designed look.
-        Light,   ///< Saikou brand palette, light.
-        System,  ///< Hand the widgets to the platform style: Kvantum, Breeze, GTK…
+        Dark = 0,   ///< Saikou brand palette. The designed look, and the only one shipped.
+        System = 2, ///< Hand the widgets to the platform style: Kvantum, Breeze, GTK…
     };
     Q_ENUM(Mode)
 

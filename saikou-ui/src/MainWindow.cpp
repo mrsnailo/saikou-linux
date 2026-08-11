@@ -367,13 +367,9 @@ void MainWindow::chooseSource()
 void MainWindow::toggleTheme()
 {
     Theme *theme = Theme::instance();
-    // The toggle flips between the two branded themes; "follow system" is a deliberate
-    // choice made in Settings, not something a stray click should drop you out of.
-    if (theme->mode() == Theme::System) {
-        theme->setMode(theme->tokens().isDark ? Theme::Light : Theme::Dark);
-        return;
-    }
-    theme->setMode(theme->mode() == Theme::Dark ? Theme::Light : Theme::Dark);
+    // There is only one branded theme now, so this toggles between it and the platform
+    // style rather than between a dark and a light palette.
+    theme->setMode(theme->mode() == Theme::System ? Theme::Dark : Theme::System);
 }
 
 void MainWindow::refreshAccount()
