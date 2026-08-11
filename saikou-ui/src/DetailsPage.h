@@ -4,6 +4,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QWidget>
 
 class CoreClient;
@@ -49,6 +50,8 @@ private:
     void showMedia(const QJsonObject &media);
     void loadSources();
     void matchSource();
+    /// The search hit that best matches this title, rather than whichever came back first.
+    QJsonObject bestMatch(const QJsonArray &results) const;
     void loadEpisodes(const QString &link);
     void playEpisodeAt(int index);
     void reportWatched(int episodeNumber);
@@ -81,4 +84,7 @@ private:
 
     QJsonArray m_episodeData;
     PlayerWindow *m_player = nullptr;
+
+    /// Sources whose show link is the AniList id, so no title search is needed.
+    QSet<QString> m_anilistKeyed;
 };

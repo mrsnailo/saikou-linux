@@ -22,6 +22,61 @@
 
 namespace {
 
+/** Case, punctuation and spacing removed, so "NARUTO" and "Naruto:" compare equal. */
+QString normalizedTitle(const QString &title)
+{
+    QString out;
+    out.reserve(title.size());
+    for (const QChar &c : title) {
+        if (c.isLetterOrNumber()) {
+            out.append(c.toLower());
+        } else if (!out.endsWith(QLatin1Char(' '))) {
+            out.append(QLatin1Char(' '));
+        }
+    }
+    return out.trimmed();
+}
+
+/**
+ * How well a source's title matches an AniList one. Higher is better; 0 means unrelated.
+ *
+ * The interesting case is not the exact hit but the near miss: "One Piece: Emergency
+ * Planning" contains every word of "One Piece", so word overlap alone would rank it level
+ * with the series itself. The surplus-word penalty is what separates them.
+ */
+int titleScore(const QString &candidate, const QString &target)
+{
+    const QString a = normalizedTitle(candidate);
+    const QString b = normalizedTitle(target);
+    if (a.isEmpty() || b.isEmpty()) {
+        return 0;
+    }
+    if (a == b) {
+        return 1000;
+    }
+
+    const QStringList wordsA = a.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const QStringList wordsB = b.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (wordsB.isEmpty()) {
+        return 0;
+    }
+
+    int matched = 0;
+    for (const QString &word : wordsB) {
+        if (wordsA.contains(word)) {
+            ++matched;
+        }
+    }
+
+    int score = matched * 100 / wordsB.size();
+    if (a.startsWith(b) || b.startsWith(a)) {
+        score += 300;
+    } else if (a.contains(b) || b.contains(a)) {
+        score += 150;
+    }
+    return score - qAbs(wordsA.size() - wordsB.size()) * 20;
+}
+
 /** A `.meta-row`: label left, value right, hairline underneath. */
 class MetaRow : public QWidget
 {
@@ -324,9 +379,14 @@ void DetailsPage::loadSources()
                        const QString previous = m_sources->currentText();
                        m_sources->blockSignals(true);
                        m_sources->clear();
+                       m_anilistKeyed.clear();
                        for (const QJsonValue &value : result.toArray()) {
                            const QJsonObject source = value.toObject();
-                           m_sources->addItem(source.value(QStringLiteral("name")).toString());
+                           const QString name = source.value(QStringLiteral("name")).toString();
+                           m_sources->addItem(name);
+                           if (source.value(QStringLiteral("anilistKeyed")).toBool()) {
+                               m_anilistKeyed.insert(name);
+                           }
                            if (!source.value(QStringLiteral("enabled")).toBool()) {
                                m_sources->setItemData(m_sources->count() - 1,
                                                       source.value(QStringLiteral("reason")).toString(),
@@ -440,17 +500,27 @@ void DetailsPage::updateMetaTable()
 
 void DetailsPage::matchSource()
 {
+    const QString source = m_sources->currentText();
     QString name = m_media.romaji.isEmpty() ? m_media.title : m_media.romaji;
     if (name.isEmpty()) {
         return;
     }
 
     m_episodes->clearEpisodes();
-    setSourceStatus(tr("Searching %1…").arg(m_sources->currentText()), true);
+
+    // A source indexed by AniList id needs no search: the id we already hold is the link,
+    // and it is exact where a title search is a guess.
+    if (m_anilistKeyed.contains(source) && m_media.id > 0) {
+        setSourceStatus(tr("Loading from %1…").arg(source), true);
+        loadEpisodes(QString::number(m_media.id));
+        return;
+    }
+
+    setSourceStatus(tr("Searching %1…").arg(source), true);
 
     const QJsonObject params{
         {QStringLiteral("query"), name},
-        {QStringLiteral("source"), m_sources->currentText()},
+        {QStringLiteral("source"), source},
     };
 
     m_client->call(QStringLiteral("anime.search"), params,
@@ -466,12 +536,54 @@ void DetailsPage::matchSource()
                            return;
                        }
 
-                       const QJsonObject match = results.first().toObject();
+                       const QJsonObject match = bestMatch(results);
                        setSourceStatus(tr("Matched %1").arg(match.value(QStringLiteral("name"))
                                                                 .toString()),
                                        true);
                        loadEpisodes(match.value(QStringLiteral("link")).toString());
                    });
+}
+
+/**
+ * Picks the search hit that actually is this title.
+ *
+ * Taking the first hit is what made the episode list come up empty: sources order results
+ * their own way, so "One Piece" would land on a five-minute special that has no episodes
+ * at all while the real series sat further down the list. Every name a hit carries is
+ * scored against every name AniList gave us, and the best pair wins.
+ */
+QJsonObject DetailsPage::bestMatch(const QJsonArray &results) const
+{
+    QStringList wanted{m_media.romaji, m_media.title};
+    wanted.removeAll(QString());
+    if (wanted.isEmpty()) {
+        return results.first().toObject();
+    }
+
+    QJsonObject best = results.first().toObject();
+    int bestScore = -1;
+
+    for (const QJsonValue &value : results) {
+        const QJsonObject candidate = value.toObject();
+
+        QStringList names{candidate.value(QStringLiteral("name")).toString()};
+        for (const QJsonValue &other : candidate.value(QStringLiteral("otherNames")).toArray()) {
+            names << other.toString();
+        }
+
+        int score = 0;
+        for (const QString &name : names) {
+            for (const QString &target : wanted) {
+                score = std::max(score, titleScore(name, target));
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = candidate;
+        }
+    }
+
+    return best;
 }
 
 void DetailsPage::loadEpisodes(const QString &link)
