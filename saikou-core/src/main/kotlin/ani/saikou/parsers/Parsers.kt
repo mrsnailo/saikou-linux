@@ -26,6 +26,14 @@ abstract class BaseParser {
 }
 
 abstract class AnimeParser : BaseParser() {
+    /**
+     * True when this source's show link *is* the AniList id, so [loadEpisodes] can be
+     * called with it directly. Searching by title and taking a hit is guesswork — it is
+     * how "One Piece" ends up matched to a five-minute special with no episodes — and a
+     * source that indexes by AniList id lets the caller skip the guess entirely.
+     */
+    open val anilistKeyed = false
+
     abstract suspend fun loadEpisodes(animeLink: String, extra: Map<String, String>?): List<Episode>
 
     abstract suspend fun loadVideoServers(episodeLink: String, extra: Map<String, String>?): List<VideoServer>

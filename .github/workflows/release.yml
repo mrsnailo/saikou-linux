@@ -44,6 +44,10 @@ jobs:
       - name: Build the package
         env:
           VERSION: ${{ steps.version.outputs.value }}
+          # Compiled into the core so released builds sign in with one click. Absent on a
+          # fork without the secrets set, which only means sign-in asks for a client.
+          SAIKOU_ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+          SAIKOU_ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
         run: |
           # makepkg refuses to run as root, so the build happens as an unprivileged user.
           useradd -m builder
@@ -56,7 +60,12 @@ jobs:
           sed "s/^pkgver=.*/pkgver=$VERSION/" packaging/release/PKGBUILD > "$workdir/PKGBUILD"
 
           chown -R builder "$workdir"
-          su builder -c "cd $workdir && makepkg -f --noconfirm"
+          # makepkg runs as another user, so the client has to be handed over explicitly;
+          # `su` does not carry the environment across.
+          su builder -c "cd $workdir && \
+            SAIKOU_ANILIST_CLIENT_ID='$SAIKOU_ANILIST_CLIENT_ID' \
+            SAIKOU_ANILIST_CLIENT_SECRET='$SAIKOU_ANILIST_CLIENT_SECRET' \
+            makepkg -f --noconfirm"
 
           mkdir -p dist
           cp "$workdir"/*.pkg.tar.zst dist/
@@ -80,43 +89,202 @@ jobs:
             *) echo "FAIL: no result from the installed core" >&2; exit 1 ;;
           esac
 
-      - name: Checksums
-        run: cd dist && sha256sum * | tee SHA256SUMS
-
       - uses: actions/upload-artifact@v4
         with:
           name: saikou-arch-package
           path: dist/*
 
+  appimage:
+    name: AppImage
+    # 24.04 for Qt 6.4, which is what CMakeLists asks for; 22.04 ships 6.2. The cost is
+    # that the AppImage needs the glibc that comes with it or newer, which every distro
+    # this app targets has.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config file desktop-file-utils \
+            qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev libmpv-dev \
+            openjdk-21-jdk libfuse2t64 netcat-openbsd wget
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        env:
+          SAIKOU_ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+          SAIKOU_ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+          ./gradlew :saikou-core:installDist --no-daemon --console=plain
+          cmake -S saikou-ui -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build
+
+      - name: Deploy Qt into the AppDir
+        run: |
+          DESTDIR="$PWD/AppDir" cmake --install build
+
+          # AppRun points the UI at the bundled core. Without it the app would spawn
+          # whatever saikou-core happens to be on the host's PATH, or none at all. It is
+          # written before linuxdeploy runs, which then leaves it alone.
+          cat > AppDir/AppRun <<'SH'
+          #!/bin/sh
+          here=$(dirname "$(readlink -f "$0")")
+          export SAIKOU_CORE="${SAIKOU_CORE:-$here/usr/bin/saikou-core}"
+          export PATH="$here/usr/bin:$PATH"
+          exec "$here/usr/bin/saikou-ui" "$@"
+          SH
+          chmod +x AppDir/AppRun
+
+          # Kept in the workspace rather than /usr/local/bin, which is root-owned on the
+          # runners. The directory goes on PATH for later steps because `--plugin qt`
+          # resolves linuxdeploy-plugin-qt by name.
+          mkdir -p "$PWD/tools"
+          wget -qO tools/linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -qO tools/linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          wget -qO tools/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x tools/*
+          echo "$PWD/tools" >> "$GITHUB_PATH"
+          export PATH="$PWD/tools:$PATH"
+
+          # The runners have no FUSE device, so these tools cannot mount themselves; this
+          # makes every AppImage unpack to a temp dir and run from there instead.
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export QMAKE=/usr/lib/qt6/bin/qmake6
+          linuxdeploy --appdir AppDir --plugin qt \
+            -d AppDir/usr/share/applications/io.github.saikou.Saikou.desktop \
+            -i AppDir/usr/share/icons/hicolor/scalable/apps/io.github.saikou.Saikou.svg
+
+      - name: Add the Java runtime and the core
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+
+          # After linuxdeploy, never before: it walks every ELF file in the AppDir and
+          # resolves its dependencies, and the JVM's own libraries link against libjvm.so
+          # through an rpath it does not follow — which fails the whole deployment.
+          #
+          # jlink keeps the runtime to the modules the core actually uses: java.net.http
+          # and the crypto modules for the AniList and scraper requests, java.naming for
+          # DNS through OkHttp, jdk.unsupported for kotlinx-serialization's field access.
+          "$JAVA_HOME/bin/jlink" \
+            --add-modules java.base,java.net.http,java.logging,java.naming,java.management,java.security.jgss,java.security.sasl,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.zipfs \
+            --strip-debug --no-header-files --no-man-pages --compress=zip-6 \
+            --output AppDir/usr/lib/jvm
+
+          mkdir -p AppDir/usr/lib/saikou
+          cp -r saikou-core/build/install/saikou-core/lib AppDir/usr/lib/saikou/lib
+
+          # Resolves its own location: an AppImage is mounted at a different path on every
+          # run, so nothing here may be absolute.
+          cat > AppDir/usr/bin/saikou-core <<'SH'
+          #!/bin/sh
+          here=$(dirname "$(readlink -f "$0")")
+          root=$(dirname "$here")
+          exec "$root/lib/jvm/bin/java" -cp "$root/lib/saikou/lib/*" ani.saikou.MainKt "$@"
+          SH
+          chmod +x AppDir/usr/bin/saikou-core
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          mkdir -p dist
+          appimagetool AppDir "dist/Saikou-$VERSION-x86_64.AppImage"
+
+      - name: Verify the AppImage runs
+        run: |
+          chmod +x dist/*.AppImage
+          # Extracted rather than mounted: the runner has no FUSE device.
+          ./dist/*.AppImage --appimage-extract >/dev/null
+          squashfs-root/usr/bin/saikou-core --socket /tmp/ai.sock &
+          for _ in $(seq 1 40); do [ -S /tmp/ai.sock ] && break; sleep 0.25; done
+          response=$(printf '{"jsonrpc":"2.0","id":1,"method":"anilist.trending","params":{"perPage":1}}\n' \
+            | timeout 30 nc -U -q 2 /tmp/ai.sock | head -1)
+          echo "$response" | head -c 200
+          case "$response" in
+            *'"result"'*) echo "OK" ;;
+            *) echo "FAIL: the bundled core did not answer" >&2; exit 1 ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: saikou-appimage
+          path: dist/*
+
+  publish:
+    name: Publish
+    needs: [archpkg, appimage]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          find staging -type f -exec cp {} dist/ \;
+          cd dist && sha256sum * | tee SHA256SUMS
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.value }}
+          VERSION: ${{ github.ref_name }}
         run: |
+          version="${VERSION#v}"
           cat > /tmp/notes.md <<EOF
           ## Install on Arch
 
           \`\`\`sh
-          sudo pacman -U saikou-linux-$VERSION-1-x86_64.pkg.tar.zst
+          sudo pacman -U saikou-linux-$version-1-x86_64.pkg.tar.zst
           \`\`\`
 
           pacman pulls in \`qt6-base\`, \`mpv\` and a JRE. Launch it from your application
           menu or run \`saikou-ui\`.
 
+          ## Anywhere else
+
+          \`\`\`sh
+          chmod +x Saikou-$version-x86_64.AppImage
+          ./Saikou-$version-x86_64.AppImage
+          \`\`\`
+
+          The AppImage carries Qt and its own Java runtime, so the only thing it needs from
+          the host is mpv's libraries and a glibc no older than Ubuntu 24.04's.
+
           ## Connect AniList
 
-          Create a client at <https://anilist.co/settings/developer> with redirect url
-          \`http://localhost:8998/callback\`, then paste its id and secret into
-          **Settings** and sign in.
+          **Settings → Account → Sign in with AniList.** Your browser opens, you approve,
+          and the tab hands the token back. Nothing to create, nothing to paste.
 
-          ## Before it can play anything
+          ## Sources
 
-          Video sources need a backend API that this repository does not ship. Set it under
-          **Settings → Anime backend**, or launch with \`SAIKOU_API_HOST\` and
-          \`SAIKOU_API_KEY\`. AniList browsing, search and tracking work without it.
+          **AniBD**, **KickAssAnime** and **AnimeHeaven** work out of the box and need no
+          configuration. AniBD is the default: it indexes by AniList id, so opening a title
+          goes straight to its episodes instead of searching for a name that matches.
+
+          The other four proxy through a private backend API this repository does not ship;
+          they report themselves unavailable until you set one under **Settings → Sources**.
           EOF
 
           gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Saikou $VERSION" \
+            --title "Saikou $version" \
             --notes-file /tmp/notes.md

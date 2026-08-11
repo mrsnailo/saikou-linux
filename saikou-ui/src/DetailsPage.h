@@ -1,59 +1,90 @@
 #pragma once
 
+#include "model/Media.h"
+
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QString>
+#include <QSet>
 #include <QWidget>
 
 class CoreClient;
+class EpisodeList;
 class PlayerWindow;
+class PosterGrid;
 class QComboBox;
 class QLabel;
-class QListWidget;
 class QPushButton;
-class QTextBrowser;
+class QStackedWidget;
+class ScrollPage;
+class TabBarStrip;
 
-/// One title: its AniList metadata on the left, the episode list from a streaming source
-/// on the right.
-///
-/// The two halves are independent — AniList always has the metadata, while the source
-/// match can fail. Showing them separately means a broken source still leaves a usable
-/// page instead of an empty one.
-class DetailsPage : public QWidget {
+/**
+ * One title: banner, poster, metadata table, and the Info / Episodes tabs.
+ *
+ * The page owns the whole match-and-play chain — AniList gives the metadata, an anime
+ * source is searched for the same title, and its episode list is what actually plays —
+ * because that chain only makes sense as one flow and splitting it across widgets would
+ * scatter the failure handling.
+ */
+class DetailsPage : public QWidget
+{
     Q_OBJECT
 
 public:
-    DetailsPage(CoreClient *client, QWidget *parent = nullptr);
+    explicit DetailsPage(CoreClient *client, QWidget *parent = nullptr);
 
     void load(int mediaId);
+    /** Loads and jumps straight to Episodes, for "Continue episode N". */
+    void loadAndPlayNext(int mediaId);
+    /** Applies the source chosen in the top bar. */
+    void setPreferredSource(const QString &name);
 
 Q_SIGNALS:
     void back();
     void progressUpdated(int mediaId, int progress);
+    void statusMessage(const QString &message, bool healthy);
+    void mediaActivated(int mediaId);
 
 private:
     void buildUi();
     void showMedia(const QJsonObject &media);
+    void loadSources();
     void matchSource();
+    /// The search hit that best matches this title, rather than whichever came back first.
+    QJsonObject bestMatch(const QJsonArray &results) const;
     void loadEpisodes(const QString &link);
-    void playSelected();
+    void playEpisodeAt(int index);
     void reportWatched(int episodeNumber);
     void setSourceStatus(const QString &message, bool busy);
+    void updateMetaTable();
 
     CoreClient *m_client;
-    PlayerWindow *m_player = nullptr;
+    ScrollPage *m_scroll = nullptr;
 
-    QLabel *m_cover;
-    QLabel *m_title;
-    QLabel *m_meta;
-    QTextBrowser *m_description;
-    QComboBox *m_sources;
-    QLabel *m_sourceStatus;
-    QListWidget *m_episodes;
-    QPushButton *m_play;
-
-    QJsonObject m_media;
-    QJsonArray m_episodeData;
+    Media m_media;
+    QJsonObject m_mediaJson;
     int m_mediaId = 0;
     int m_progress = 0;
+    bool m_playNextOnLoad = false;
+
+    class DetailBanner *m_banner = nullptr;
+    class PosterArt *m_poster = nullptr;
+    QLabel *m_status = nullptr;
+    QLabel *m_title = nullptr;
+    QLabel *m_description = nullptr;
+    QLabel *m_sourceStatus = nullptr;
+    QWidget *m_tagRow = nullptr;
+    QWidget *m_metaTable = nullptr;
+    QPushButton *m_play = nullptr;
+    QComboBox *m_sources = nullptr;
+    TabBarStrip *m_tabs = nullptr;
+    QStackedWidget *m_tabPanels = nullptr;
+    EpisodeList *m_episodes = nullptr;
+    PosterGrid *m_recommendations = nullptr;
+
+    QJsonArray m_episodeData;
+    PlayerWindow *m_player = nullptr;
+
+    /// Sources whose show link is the AniList id, so no title search is needed.
+    QSet<QString> m_anilistKeyed;
 };

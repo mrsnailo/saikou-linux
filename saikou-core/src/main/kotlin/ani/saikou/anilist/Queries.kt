@@ -55,6 +55,47 @@ object Queries {
         }
     """
 
+    /**
+     * The Browse screen's one query. Every filter is nullable, and AniList skips a
+     * null argument entirely, so the same document serves "everything, by popularity"
+     * and "action + drama, TV, this season, by score".
+     */
+    val BROWSE = """
+        query (${'$'}page: Int, ${'$'}perPage: Int, ${'$'}search: String, ${'$'}genres: [String],
+               ${'$'}sort: [MediaSort], ${'$'}format: MediaFormat, ${'$'}season: MediaSeason,
+               ${'$'}seasonYear: Int, ${'$'}status: MediaStatus) {
+            Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                pageInfo { hasNextPage currentPage }
+                media(type: ANIME, search: ${'$'}search, genre_in: ${'$'}genres, sort: ${'$'}sort,
+                      format: ${'$'}format, season: ${'$'}season, seasonYear: ${'$'}seasonYear,
+                      status: ${'$'}status, isAdult: false) { $MEDIA_FIELDS }
+            }
+        }
+    """
+
+    val GENRES = """
+        query { GenreCollection }
+    """
+
+    /**
+     * The week's airing schedule. One flat, time-sorted list; the UI buckets it into days
+     * in the local timezone, which the server cannot do for us.
+     */
+    val AIRING = """
+        query (${'$'}start: Int, ${'$'}end: Int, ${'$'}page: Int, ${'$'}perPage: Int) {
+            Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                pageInfo { hasNextPage currentPage }
+                airingSchedules(airingAt_greater: ${'$'}start, airingAt_lesser: ${'$'}end,
+                                sort: TIME) {
+                    id
+                    episode
+                    airingAt
+                    media { $MEDIA_FIELDS }
+                }
+            }
+        }
+    """
+
     val MEDIA = """
         query (${'$'}id: Int) {
             Media(id: ${'$'}id, type: ANIME) {

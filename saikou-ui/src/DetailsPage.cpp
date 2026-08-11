@@ -1,18 +1,171 @@
 #include "DetailsPage.h"
 
 #include "CoreClient.h"
-#include "ImageLoader.h"
 #include "PlayerWindow.h"
+#include "pages/ScrollPage.h"
+#include "theme/Theme.h"
+#include "theme/Type.h"
+#include "widgets/Controls.h"
+#include "widgets/DetailWidgets.h"
+#include "widgets/FlowLayout.h"
+#include "widgets/MediaViews.h"
 
 #include <QComboBox>
-#include <QGridLayout>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QJsonValue>
 #include <QLabel>
-#include <QListWidget>
+#include <QPainter>
 #include <QPushButton>
-#include <QTextBrowser>
+#include <QStackedWidget>
 #include <QVBoxLayout>
+
+namespace {
+
+/** Case, punctuation and spacing removed, so "NARUTO" and "Naruto:" compare equal. */
+QString normalizedTitle(const QString &title)
+{
+    QString out;
+    out.reserve(title.size());
+    for (const QChar &c : title) {
+        if (c.isLetterOrNumber()) {
+            out.append(c.toLower());
+        } else if (!out.endsWith(QLatin1Char(' '))) {
+            out.append(QLatin1Char(' '));
+        }
+    }
+    return out.trimmed();
+}
+
+/**
+ * How well a source's title matches an AniList one. Higher is better; 0 means unrelated.
+ *
+ * The interesting case is not the exact hit but the near miss: "One Piece: Emergency
+ * Planning" contains every word of "One Piece", so word overlap alone would rank it level
+ * with the series itself. The surplus-word penalty is what separates them.
+ */
+int titleScore(const QString &candidate, const QString &target)
+{
+    const QString a = normalizedTitle(candidate);
+    const QString b = normalizedTitle(target);
+    if (a.isEmpty() || b.isEmpty()) {
+        return 0;
+    }
+    if (a == b) {
+        return 1000;
+    }
+
+    const QStringList wordsA = a.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    const QStringList wordsB = b.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (wordsB.isEmpty()) {
+        return 0;
+    }
+
+    int matched = 0;
+    for (const QString &word : wordsB) {
+        if (wordsA.contains(word)) {
+            ++matched;
+        }
+    }
+
+    int score = matched * 100 / wordsB.size();
+    if (a.startsWith(b) || b.startsWith(a)) {
+        score += 300;
+    } else if (a.contains(b) || b.contains(a)) {
+        score += 150;
+    }
+    return score - qAbs(wordsA.size() - wordsB.size()) * 20;
+}
+
+/** A `.meta-row`: label left, value right, hairline underneath. */
+class MetaRow : public QWidget
+{
+public:
+    MetaRow(const QString &key, const QString &value, bool accent, QWidget *parent)
+        : QWidget(parent)
+        , m_key(key)
+        , m_value(value)
+        , m_accent(accent)
+    {
+        setFixedHeight(38);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        connect(Theme::instance(), &Theme::changed, this, qOverload<>(&QWidget::update));
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        const Tokens &t = Theme::instance()->tokens();
+        QPainter painter(this);
+        painter.setFont(Type::small());
+
+        painter.setPen(t.muted);
+        painter.drawText(QRect(0, 0, width() / 2, height() - 1), Qt::AlignVCenter | Qt::AlignLeft,
+                         m_key);
+
+        QFont valueFont = Type::small();
+        valueFont.setPixelSize(14);
+        valueFont.setWeight(QFont::DemiBold);
+        painter.setFont(valueFont);
+        painter.setPen(m_accent ? t.accent : t.fg);
+        const QRect valueRect(width() / 2, 0, width() / 2, height() - 1);
+        painter.drawText(valueRect, Qt::AlignVCenter | Qt::AlignRight,
+                         QFontMetrics(valueFont).elidedText(m_value, Qt::ElideRight,
+                                                            valueRect.width()));
+
+        painter.setPen(QPen(t.border, 1));
+        painter.drawLine(0, height() - 1, width(), height() - 1);
+    }
+
+private:
+    QString m_key;
+    QString m_value;
+    bool m_accent;
+};
+
+/** A `.tag` pill for genres. */
+class Tag : public QWidget
+{
+public:
+    Tag(const QString &text, QWidget *parent)
+        : QWidget(parent)
+        , m_text(text)
+    {
+        setFixedHeight(26);
+        connect(Theme::instance(), &Theme::changed, this, qOverload<>(&QWidget::update));
+    }
+
+    QSize sizeHint() const override
+    {
+        QFont font = Type::small();
+        font.setPixelSize(12);
+        return {QFontMetrics(font).horizontalAdvance(m_text) + 22, 26};
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        const Tokens &t = Theme::instance()->tokens();
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        const QRectF box = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+        painter.setPen(QPen(t.border, 1));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(box, box.height() / 2, box.height() / 2);
+
+        QFont font = Type::small();
+        font.setPixelSize(12);
+        painter.setFont(font);
+        painter.setPen(t.muted);
+        painter.drawText(box, Qt::AlignCenter, m_text);
+    }
+
+private:
+    QString m_text;
+};
+
+}  // namespace
 
 DetailsPage::DetailsPage(CoreClient *client, QWidget *parent)
     : QWidget(parent)
@@ -23,203 +176,351 @@ DetailsPage::DetailsPage(CoreClient *client, QWidget *parent)
 
 void DetailsPage::buildUi()
 {
-    auto *layout = new QHBoxLayout(this);
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
 
-    auto *left = new QVBoxLayout;
-    left->setSpacing(8);
+    m_scroll = new ScrollPage(this);
+    m_scroll->setGutterEnabled(false);
+    m_scroll->contentLayout()->setSpacing(0);
+    outer->addWidget(m_scroll);
 
-    auto *backButton = new QPushButton(tr("← Back"), this);
-    connect(backButton, &QPushButton::clicked, this, &DetailsPage::back);
-    left->addWidget(backButton, 0, Qt::AlignLeft);
+    QWidget *page = m_scroll->content();
 
-    m_cover = new QLabel(this);
-    m_cover->setFixedSize(230, 325);
-    m_cover->setScaledContents(true);
-    left->addWidget(m_cover);
+    m_banner = new DetailBanner(page);
+    m_scroll->contentLayout()->addWidget(m_banner);
 
-    m_meta = new QLabel(this);
-    m_meta->setWordWrap(true);
-    m_meta->setTextFormat(Qt::RichText);
-    left->addWidget(m_meta);
-    left->addStretch(1);
-
-    layout->addLayout(left);
-
-    auto *right = new QVBoxLayout;
-
-    m_title = new QLabel(this);
-    m_title->setWordWrap(true);
-    QFont titleFont = m_title->font();
-    titleFont.setPointSize(titleFont.pointSize() + 6);
-    titleFont.setBold(true);
-    m_title->setFont(titleFont);
-    right->addWidget(m_title);
-
-    m_description = new QTextBrowser(this);
-    m_description->setOpenExternalLinks(true);
-    m_description->setMaximumHeight(170);
-    right->addWidget(m_description);
-
-    auto *sourceRow = new QHBoxLayout;
-    sourceRow->addWidget(new QLabel(tr("Source:"), this));
-    m_sources = new QComboBox(this);
-    sourceRow->addWidget(m_sources);
-    m_sourceStatus = new QLabel(this);
-    m_sourceStatus->setWordWrap(true);
-    sourceRow->addWidget(m_sourceStatus, 1);
-    right->addLayout(sourceRow);
-
-    m_episodes = new QListWidget(this);
-    right->addWidget(m_episodes, 1);
-
-    m_play = new QPushButton(tr("Play"), this);
-    m_play->setEnabled(false);
-    right->addWidget(m_play, 0, Qt::AlignRight);
-
-    layout->addLayout(right, 1);
-
-    connect(m_play, &QPushButton::clicked, this, &DetailsPage::playSelected);
-    connect(m_episodes, &QListWidget::itemActivated, this, &DetailsPage::playSelected);
-    connect(m_episodes, &QListWidget::currentRowChanged, this, [this](int row) {
-        m_play->setEnabled(row >= 0);
+    auto *columns = new QWidget(page);
+    auto *columnsRow = new QHBoxLayout(columns);
+    const int gutter = Theme::instance()->tokens().gutter;
+    // The columns ride up over the banner — `.detail-cols { margin-top: -96px }`.
+    columnsRow->setContentsMargins(gutter, -96, gutter, 0);
+    columnsRow->setSpacing(40);
+    columnsRow->setAlignment(Qt::AlignTop);
+    connect(Theme::instance(), &Theme::changed, this, [columnsRow] {
+        const int g = Theme::instance()->tokens().gutter;
+        columnsRow->setContentsMargins(g, -96, g, 0);
     });
+    m_scroll->contentLayout()->addWidget(columns);
+    m_scroll->contentLayout()->addStretch(1);
+
+    // ---------------- aside ----------------
+    auto *aside = new QWidget(columns);
+    aside->setFixedWidth(232);
+    auto *asideColumn = new QVBoxLayout(aside);
+    asideColumn->setContentsMargins(0, 0, 0, 0);
+    asideColumn->setSpacing(14);
+
+    m_poster = new PosterArt(aside);
+    m_poster->setFixedSize(232, 348);
+    asideColumn->addWidget(m_poster);
+
+    m_play = makePillButton(tr("Play next episode"), ButtonVariant::Primary, Icons::Play, aside);
+    m_play->setEnabled(false);
+    connect(m_play, &QPushButton::clicked, this, [this] {
+        playEpisodeAt(m_episodes->nextUnwatchedIndex());
+    });
+    asideColumn->addWidget(m_play);
+
+    auto *backButton = makePillButton(tr("Back"), ButtonVariant::Quiet, Icons::ArrowLeft, aside);
+    connect(backButton, &QPushButton::clicked, this, &DetailsPage::back);
+    asideColumn->addWidget(backButton);
+
+    asideColumn->addSpacing(6);
+    asideColumn->addWidget(
+        new TokenLabel(tr("SOURCE"), TokenLabel::Accent2, Type::caps(), aside));
+    m_sources = new QComboBox(aside);
+    asideColumn->addWidget(m_sources);
+
+    m_sourceStatus = new TokenLabel(QString(), TokenLabel::Muted, Type::small(), aside);
+    m_sourceStatus->setWordWrap(true);
+    asideColumn->addWidget(m_sourceStatus);
+
+    asideColumn->addSpacing(10);
+    m_metaTable = new QWidget(aside);
+    auto *metaColumn = new QVBoxLayout(m_metaTable);
+    metaColumn->setContentsMargins(0, 0, 0, 0);
+    metaColumn->setSpacing(0);
+    asideColumn->addWidget(m_metaTable);
+    asideColumn->addStretch(1);
+
+    columnsRow->addWidget(aside, 0, Qt::AlignTop);
+
+    // ---------------- main ----------------
+    auto *main = new QWidget(columns);
+    auto *mainColumn = new QVBoxLayout(main);
+    mainColumn->setContentsMargins(0, 100, 0, 0);
+    mainColumn->setSpacing(0);
+
+    m_status = new TokenLabel(QString(), TokenLabel::Accent, Type::caps(), main);
+    mainColumn->addWidget(m_status);
+    mainColumn->addSpacing(8);
+
+    m_title = new TokenLabel(tr("Loading…"), TokenLabel::Foreground, Type::h1(), main);
+    m_title->setWordWrap(true);
+    mainColumn->addWidget(m_title);
+    mainColumn->addSpacing(24);
+
+    m_tabs = new TabBarStrip(main);
+    m_tabs->addTab(tr("Info"));
+    m_tabs->addTab(tr("Episodes"));
+    mainColumn->addWidget(m_tabs);
+    mainColumn->addSpacing(24);
+
+    m_tabPanels = new QStackedWidget(main);
+
+    // --- info panel ---
+    auto *info = new QWidget(m_tabPanels);
+    auto *infoColumn = new QVBoxLayout(info);
+    infoColumn->setContentsMargins(0, 0, 0, 0);
+    infoColumn->setSpacing(0);
+
+    m_description = new TokenLabel(QString(), TokenLabel::Muted, Type::body(), info);
+    m_description->setWordWrap(true);
+    infoColumn->addWidget(m_description);
+    infoColumn->addSpacing(26);
+
+    infoColumn->addWidget(new TokenLabel(tr("Genres"), TokenLabel::Accent2, Type::label(), info));
+    infoColumn->addSpacing(10);
+    m_tagRow = new QWidget(info);
+    new FlowLayout(m_tagRow, 0, 8, 8);
+    infoColumn->addWidget(m_tagRow);
+    infoColumn->addSpacing(30);
+
+    infoColumn->addWidget(
+        new TokenLabel(tr("Recommended"), TokenLabel::Accent2, Type::label(), info));
+    infoColumn->addSpacing(12);
+    m_recommendations = new PosterGrid(info);
+    m_recommendations->setMinimumCardWidth(140);
+    connect(m_recommendations, &PosterGrid::activated, this, &DetailsPage::mediaActivated);
+    infoColumn->addWidget(m_recommendations);
+    infoColumn->addStretch(1);
+    m_tabPanels->addWidget(info);
+
+    // --- episodes panel ---
+    auto *episodes = new QWidget(m_tabPanels);
+    auto *episodesColumn = new QVBoxLayout(episodes);
+    episodesColumn->setContentsMargins(0, 0, 0, 0);
+    episodesColumn->setSpacing(0);
+    m_episodes = new EpisodeList(episodes);
+    connect(m_episodes, &EpisodeList::episodeActivated, this, &DetailsPage::playEpisodeAt);
+    episodesColumn->addWidget(m_episodes);
+    episodesColumn->addStretch(1);
+    m_tabPanels->addWidget(episodes);
+
+    mainColumn->addWidget(m_tabPanels);
+    mainColumn->addStretch(1);
+    columnsRow->addWidget(main, 1);
+
+    connect(m_tabs, &TabBarStrip::currentChanged, m_tabPanels, &QStackedWidget::setCurrentIndex);
     connect(m_sources, &QComboBox::currentTextChanged, this, [this](const QString &) {
-        if (m_mediaId != 0) {
+        if (m_mediaId != 0 && !m_mediaJson.isEmpty()) {
             matchSource();
         }
     });
-
-    connect(ImageLoader::instance(), &ImageLoader::loaded, this,
-            [this](const QString &url, const QPixmap &pixmap) {
-                if (url == m_cover->property("url").toString()) {
-                    m_cover->setPixmap(pixmap);
-                }
-            });
 }
 
 void DetailsPage::load(int mediaId)
 {
     m_mediaId = mediaId;
+    m_mediaJson = {};
     m_media = {};
-    m_episodes->clear();
+    m_episodes->clearEpisodes();
     m_episodeData = {};
     m_play->setEnabled(false);
     m_title->setText(tr("Loading…"));
+    m_status->clear();
     m_description->clear();
-    m_meta->clear();
+    m_sourceStatus->clear();
+    m_tabs->setCurrentIndex(0);
+    m_tabPanels->setCurrentIndex(0);
 
     m_client->call(QStringLiteral("anilist.media"),
                    QJsonObject{{QStringLiteral("id"), mediaId}},
                    [this](const QJsonValue &result, const RpcError *error) {
                        if (error) {
-                           m_title->setText(tr("Could not load this title: %1").arg(error->message));
+                           m_title->setText(tr("Could not load this title"));
+                           m_description->setText(error->message);
                            return;
                        }
                        showMedia(result.toObject());
                    });
 
-    // Populate the source list once; the enabled flag decides what is selectable.
-    m_client->call(QStringLiteral("anime.sources"), [this](const QJsonValue &result, const RpcError *error) {
-        if (error) {
-            return;
-        }
-        const QString previous = m_sources->currentText();
-        m_sources->blockSignals(true);
-        m_sources->clear();
-        for (const QJsonValue &value : result.toArray()) {
-            const QJsonObject source = value.toObject();
-            const QString name = source.value(QStringLiteral("name")).toString();
-            m_sources->addItem(name);
-            if (!source.value(QStringLiteral("enabled")).toBool()) {
-                const int index = m_sources->count() - 1;
-                m_sources->setItemData(index, source.value(QStringLiteral("reason")).toString(),
-                                       Qt::ToolTipRole);
-            }
-        }
-        if (!previous.isEmpty()) {
-            m_sources->setCurrentText(previous);
-        }
-        m_sources->blockSignals(false);
+    loadSources();
+}
 
-        // The AniList reply carries the title we search the source with. It usually
-        // arrives after this one, so let showMedia() start the match in that case.
-        if (!m_media.isEmpty()) {
-            matchSource();
-        }
-    });
+void DetailsPage::loadAndPlayNext(int mediaId)
+{
+    m_playNextOnLoad = true;
+    load(mediaId);
+    m_tabs->setCurrentIndex(1);
+}
+
+void DetailsPage::setPreferredSource(const QString &name)
+{
+    if (name.isEmpty() || m_sources->currentText() == name) {
+        return;
+    }
+    const int index = m_sources->findText(name);
+    if (index >= 0) {
+        m_sources->setCurrentIndex(index);
+    }
+}
+
+void DetailsPage::loadSources()
+{
+    m_client->call(QStringLiteral("anime.sources"),
+                   [this](const QJsonValue &result, const RpcError *error) {
+                       if (error) {
+                           setSourceStatus(error->message, false);
+                           return;
+                       }
+
+                       const QString previous = m_sources->currentText();
+                       m_sources->blockSignals(true);
+                       m_sources->clear();
+                       m_anilistKeyed.clear();
+                       for (const QJsonValue &value : result.toArray()) {
+                           const QJsonObject source = value.toObject();
+                           const QString name = source.value(QStringLiteral("name")).toString();
+                           m_sources->addItem(name);
+                           if (source.value(QStringLiteral("anilistKeyed")).toBool()) {
+                               m_anilistKeyed.insert(name);
+                           }
+                           if (!source.value(QStringLiteral("enabled")).toBool()) {
+                               m_sources->setItemData(m_sources->count() - 1,
+                                                      source.value(QStringLiteral("reason")).toString(),
+                                                      Qt::ToolTipRole);
+                           }
+                       }
+                       if (!previous.isEmpty()) {
+                           m_sources->setCurrentText(previous);
+                       }
+                       m_sources->blockSignals(false);
+
+                       // The AniList reply carries the title we search the source with; it
+                       // usually arrives after this one, so showMedia() starts the match then.
+                       if (!m_mediaJson.isEmpty()) {
+                           matchSource();
+                       }
+                   });
 }
 
 void DetailsPage::showMedia(const QJsonObject &media)
 {
-    m_media = media;
+    m_mediaJson = media;
+    m_media = Media::fromJson(media);
+    m_progress = m_media.progress;
 
-    const QJsonObject title = media.value(QStringLiteral("title")).toObject();
-    m_title->setText(title.value(QStringLiteral("userPreferred")).toString());
+    m_title->setText(m_media.title);
 
-    QString description = media.value(QStringLiteral("description")).toString();
-    description.replace(QStringLiteral("<br>"), QStringLiteral("\n"));
-    m_description->setPlainText(description);
+    QStringList lead;
+    if (!m_media.statusText().isEmpty()) {
+        lead << m_media.statusText().toUpper();
+    }
+    if (!m_media.seasonText().isEmpty()) {
+        lead << m_media.seasonText().toUpper();
+    }
+    m_status->setText(lead.join(QStringLiteral(" · ")));
 
-    const QString coverUrl = media.value(QStringLiteral("coverImage")).toObject()
-                                 .value(QStringLiteral("extraLarge")).toString();
-    m_cover->setProperty("url", coverUrl);
-    const QPixmap cover = ImageLoader::instance()->get(coverUrl);
-    if (!cover.isNull()) {
-        m_cover->setPixmap(cover);
+    m_description->setText(m_media.plainDescription());
+    m_poster->setImageUrl(m_media.coverUrl);
+    m_banner->setImageUrl(m_media.bannerUrl.isEmpty() ? m_media.coverUrl : m_media.bannerUrl);
+
+    // --- genre tags ---
+    // Emptied through the layout rather than findChildren<Tag *>(): that template asserts
+    // the type carries Q_OBJECT, which a paint-only helper class has no reason to, and the
+    // layout is the authority on what is in the row anyway.
+    if (QLayout *tags = m_tagRow->layout()) {
+        while (QLayoutItem *item = tags->takeAt(0)) {
+            delete item->widget();
+            delete item;
+        }
+        for (const QString &genre : m_media.genres) {
+            tags->addWidget(new Tag(genre, m_tagRow));
+        }
     }
 
-    QStringList facts;
-    const int episodes = media.value(QStringLiteral("episodes")).toInt();
-    if (episodes > 0) {
-        facts << tr("<b>Episodes:</b> %1").arg(episodes);
-    }
-    const QString status = media.value(QStringLiteral("status")).toString();
-    if (!status.isEmpty()) {
-        facts << tr("<b>Status:</b> %1").arg(status);
-    }
-    const int score = media.value(QStringLiteral("averageScore")).toInt();
-    if (score > 0) {
-        facts << tr("<b>Score:</b> %1%").arg(score);
-    }
-    const QJsonArray studios = media.value(QStringLiteral("studios")).toObject()
-                                   .value(QStringLiteral("nodes")).toArray();
-    if (!studios.isEmpty()) {
-        facts << tr("<b>Studio:</b> %1").arg(studios.first().toObject()
-                                                 .value(QStringLiteral("name")).toString());
-    }
+    updateMetaTable();
 
-    const QJsonObject entry = media.value(QStringLiteral("mediaListEntry")).toObject();
-    if (!entry.isEmpty()) {
-        m_progress = entry.value(QStringLiteral("progress")).toInt();
-        facts << tr("<b>Your progress:</b> %1").arg(m_progress);
-    } else {
-        m_progress = 0;
+    // --- recommendations ---
+    QVector<Media> recommended;
+    const QJsonArray nodes = media.value(QStringLiteral("recommendations")).toObject()
+                                 .value(QStringLiteral("nodes")).toArray();
+    for (const QJsonValue &value : nodes) {
+        const Media parsed = Media::fromJson(value.toObject()
+                                                 .value(QStringLiteral("mediaRecommendation"))
+                                                 .toObject());
+        if (parsed.isValid()) {
+            recommended.append(parsed);
+        }
     }
-
-    m_meta->setText(facts.join(QStringLiteral("<br>")));
+    m_recommendations->setMedia(recommended);
 
     if (m_sources->count() > 0) {
         matchSource();
     }
 }
 
+void DetailsPage::updateMetaTable()
+{
+    auto *column = qobject_cast<QVBoxLayout *>(m_metaTable->layout());
+    while (QLayoutItem *item = column->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+
+    const auto addRow = [this, column](const QString &key, const QString &value, bool accent) {
+        if (!value.isEmpty()) {
+            column->addWidget(new MetaRow(key, value, accent, m_metaTable));
+        }
+    };
+
+    addRow(tr("Format"), m_media.format, false);
+    addRow(tr("Episodes"), m_media.episodes > 0 ? QString::number(m_media.episodes) : QString(),
+           false);
+    addRow(tr("Duration"), m_media.duration > 0 ? tr("%1 min").arg(m_media.duration) : QString(),
+           false);
+    addRow(tr("Status"), m_media.statusText(), false);
+    addRow(tr("Season"), m_media.seasonText(), false);
+    addRow(tr("Studio"), m_media.studio, false);
+    addRow(tr("Score"), m_media.scoreText(), true);
+    if (m_media.hasListEntry) {
+        addRow(tr("Your progress"),
+               m_media.episodes > 0 ? tr("%1 / %2").arg(m_progress).arg(m_media.episodes)
+                                    : QString::number(m_progress),
+               true);
+    }
+    if (m_media.nextEpisode > 0) {
+        addRow(tr("Next episode"), QString::number(m_media.nextEpisode), true);
+    }
+}
+
 void DetailsPage::matchSource()
 {
-    const QJsonObject title = m_media.value(QStringLiteral("title")).toObject();
-    QString name = title.value(QStringLiteral("romaji")).toString();
-    if (name.isEmpty()) {
-        name = title.value(QStringLiteral("userPreferred")).toString();
-    }
+    const QString source = m_sources->currentText();
+    QString name = m_media.romaji.isEmpty() ? m_media.title : m_media.romaji;
     if (name.isEmpty()) {
         return;
     }
 
-    m_episodes->clear();
-    setSourceStatus(tr("Searching %1…").arg(m_sources->currentText()), true);
+    m_episodes->clearEpisodes();
 
-    QJsonObject params{
+    // A source indexed by AniList id needs no search: the id we already hold is the link,
+    // and it is exact where a title search is a guess.
+    if (m_anilistKeyed.contains(source) && m_media.id > 0) {
+        setSourceStatus(tr("Loading from %1…").arg(source), true);
+        loadEpisodes(QString::number(m_media.id));
+        return;
+    }
+
+    setSourceStatus(tr("Searching %1…").arg(source), true);
+
+    const QJsonObject params{
         {QStringLiteral("query"), name},
-        {QStringLiteral("source"), m_sources->currentText()},
+        {QStringLiteral("source"), source},
     };
 
     m_client->call(QStringLiteral("anime.search"), params,
@@ -231,20 +532,63 @@ void DetailsPage::matchSource()
 
                        const QJsonArray results = result.toArray();
                        if (results.isEmpty()) {
-                           setSourceStatus(tr("No match for \"%1\" on this source.").arg(name), false);
+                           setSourceStatus(tr("No match for “%1” on this source.").arg(name), false);
                            return;
                        }
 
-                       const QJsonObject match = results.first().toObject();
-                       setSourceStatus(tr("Matched: %1").arg(match.value(QStringLiteral("name")).toString()),
+                       const QJsonObject match = bestMatch(results);
+                       setSourceStatus(tr("Matched %1").arg(match.value(QStringLiteral("name"))
+                                                                .toString()),
                                        true);
                        loadEpisodes(match.value(QStringLiteral("link")).toString());
                    });
 }
 
+/**
+ * Picks the search hit that actually is this title.
+ *
+ * Taking the first hit is what made the episode list come up empty: sources order results
+ * their own way, so "One Piece" would land on a five-minute special that has no episodes
+ * at all while the real series sat further down the list. Every name a hit carries is
+ * scored against every name AniList gave us, and the best pair wins.
+ */
+QJsonObject DetailsPage::bestMatch(const QJsonArray &results) const
+{
+    QStringList wanted{m_media.romaji, m_media.title};
+    wanted.removeAll(QString());
+    if (wanted.isEmpty()) {
+        return results.first().toObject();
+    }
+
+    QJsonObject best = results.first().toObject();
+    int bestScore = -1;
+
+    for (const QJsonValue &value : results) {
+        const QJsonObject candidate = value.toObject();
+
+        QStringList names{candidate.value(QStringLiteral("name")).toString()};
+        for (const QJsonValue &other : candidate.value(QStringLiteral("otherNames")).toArray()) {
+            names << other.toString();
+        }
+
+        int score = 0;
+        for (const QString &name : names) {
+            for (const QString &target : wanted) {
+                score = std::max(score, titleScore(name, target));
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = candidate;
+        }
+    }
+
+    return best;
+}
+
 void DetailsPage::loadEpisodes(const QString &link)
 {
-    QJsonObject params{
+    const QJsonObject params{
         {QStringLiteral("link"), link},
         {QStringLiteral("source"), m_sources->currentText()},
     };
@@ -257,46 +601,32 @@ void DetailsPage::loadEpisodes(const QString &link)
                        }
 
                        m_episodeData = result.toArray();
-                       m_episodes->clear();
+                       m_episodes->setEpisodes(m_episodeData, m_progress);
+                       m_play->setEnabled(!m_episodeData.isEmpty());
+                       setSourceStatus(tr("%n episode(s) available", nullptr,
+                                          m_episodeData.size()),
+                                       false);
 
-                       for (const QJsonValue &value : m_episodeData) {
-                           const QJsonObject episode = value.toObject();
-                           const QString number = episode.value(QStringLiteral("number")).toString();
-                           QString label = tr("Episode %1").arg(number);
-                           const QString episodeTitle = episode.value(QStringLiteral("title")).toString();
-                           if (!episodeTitle.isEmpty() && episodeTitle != label) {
-                               label += QStringLiteral(" — ") + episodeTitle;
-                           }
-                           if (number.toInt() <= m_progress && m_progress > 0) {
-                               label += tr("  ✓");
-                           }
-                           m_episodes->addItem(label);
+                       if (m_playNextOnLoad) {
+                           m_playNextOnLoad = false;
+                           playEpisodeAt(m_episodes->nextUnwatchedIndex());
                        }
-
-                       setSourceStatus(tr("%1 episodes").arg(m_episodeData.size()), false);
-
-                       // Land the selection on the next unwatched episode, which is what
-                       // the user opened this page to play.
-                       const int next = qBound(0, m_progress, m_episodes->count() - 1);
-                       m_episodes->setCurrentRow(next);
-                       m_episodes->scrollToItem(m_episodes->currentItem());
                    });
 }
 
-void DetailsPage::playSelected()
+void DetailsPage::playEpisodeAt(int index)
 {
-    const int row = m_episodes->currentRow();
-    if (row < 0 || row >= m_episodeData.size()) {
+    if (index < 0 || index >= m_episodeData.size()) {
         return;
     }
 
-    const QJsonObject episode = m_episodeData.at(row).toObject();
+    const QJsonObject episode = m_episodeData.at(index).toObject();
     const int number = episode.value(QStringLiteral("number")).toString().toInt();
 
     setSourceStatus(tr("Resolving stream…"), true);
     m_play->setEnabled(false);
 
-    QJsonObject params{
+    const QJsonObject params{
         {QStringLiteral("episodeLink"), episode.value(QStringLiteral("link")).toString()},
         {QStringLiteral("source"), m_sources->currentText()},
     };
@@ -306,6 +636,7 @@ void DetailsPage::playSelected()
                        m_play->setEnabled(true);
                        if (error) {
                            setSourceStatus(error->message, false);
+                           Q_EMIT statusMessage(error->message, false);
                            return;
                        }
 
@@ -320,7 +651,7 @@ void DetailsPage::playSelected()
                                    this, &DetailsPage::reportWatched);
                        }
 
-                       m_player->playEpisode(m_title->text(), number,
+                       m_player->playEpisode(m_media.title, number,
                                              payload.value(QStringLiteral("container")).toObject());
                    });
 }
@@ -333,28 +664,31 @@ void DetailsPage::reportWatched(int episodeNumber)
         return;
     }
     m_progress = episodeNumber;
+    m_episodes->setProgress(m_progress);
+    updateMetaTable();
 
-    const int total = m_media.value(QStringLiteral("episodes")).toInt();
-    QJsonObject params{
+    const QJsonObject params{
         {QStringLiteral("mediaId"), m_mediaId},
         {QStringLiteral("progress"), episodeNumber},
-        {QStringLiteral("status"), total > 0 && episodeNumber >= total ? QStringLiteral("COMPLETED")
-                                                                      : QStringLiteral("CURRENT")},
+        {QStringLiteral("status"), m_media.episodes > 0 && episodeNumber >= m_media.episodes
+                                       ? QStringLiteral("COMPLETED")
+                                       : QStringLiteral("CURRENT")},
     };
 
     m_client->call(QStringLiteral("anilist.setProgress"), params,
                    [this, episodeNumber](const QJsonValue &, const RpcError *error) {
                        if (error) {
-                           setSourceStatus(tr("Watched, but AniList did not update: %1")
-                                               .arg(error->message), false);
+                           Q_EMIT statusMessage(tr("Watched, but AniList did not update: %1")
+                                                    .arg(error->message), false);
                            return;
                        }
-                       setSourceStatus(tr("AniList updated to episode %1").arg(episodeNumber), false);
+                       Q_EMIT statusMessage(tr("AniList updated to episode %1").arg(episodeNumber),
+                                            true);
                        Q_EMIT progressUpdated(m_mediaId, episodeNumber);
                    });
 }
 
 void DetailsPage::setSourceStatus(const QString &message, bool busy)
 {
-    m_sourceStatus->setText(busy ? QStringLiteral("⏳ ") + message : message);
+    m_sourceStatus->setText(busy ? QStringLiteral("· ") + message : message);
 }

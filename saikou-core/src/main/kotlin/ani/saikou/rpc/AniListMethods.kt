@@ -21,20 +21,32 @@ fun Registry.registerAniListMethods() {
         buildJsonObject {
             put("configured", Auth.isConfigured)
             put("loggedIn", Auth.isLoggedIn)
+            put("usesOwnClient", Auth.usesOwnClient)
+            put("hasBundledClient", Auth.hasBundledClient)
+            put("clientId", Auth.clientId ?: "")
             put("redirectUri", Auth.redirectUri)
             put("developerUrl", "https://anilist.co/settings/developer")
         }
     }
 
-    /** Stores the user's own AniList API client credentials. */
+    /**
+     * Points sign-in at a client of the user's own. Optional — the build ships its own
+     * client id and the one-click flow needs nothing from the user. Passing blanks clears
+     * the override and returns to the built-in client.
+     */
     register("anilist.configure") { params, _ ->
         val obj = params.obj()
         Auth.configure(
-            clientId = obj.string("clientId"),
-            clientSecret = obj.string("clientSecret"),
+            clientId = obj["clientId"]?.jsonPrimitive?.content.orEmpty(),
+            clientSecret = obj["clientSecret"]?.jsonPrimitive?.content.orEmpty(),
             port = obj["port"]?.jsonPrimitive?.content?.toIntOrNull(),
         )
-        buildJsonObject { put("redirectUri", Auth.redirectUri) }
+        buildJsonObject {
+            put("redirectUri", Auth.redirectUri)
+            put("configured", Auth.isConfigured)
+            put("usesOwnClient", Auth.usesOwnClient)
+            put("hasBundledClient", Auth.hasBundledClient)
+        }
     }
 
     /** The url the UI opens in a browser. Paired with `anilist.awaitLogin`. */
@@ -92,6 +104,58 @@ fun Registry.registerAniListMethods() {
                 put("search", query)
                 put("page", params.intOr("page", 1))
                 put("perPage", params.intOr("perPage", 30))
+            },
+        ).page()
+    }
+
+    /**
+     * The filtered browse query behind the Browse screen. Absent filters are left out of
+     * the variables map rather than sent as null, so AniList treats them as unset.
+     */
+    register("anilist.browse") { params, _ ->
+        val obj = (params as? JsonObject) ?: JsonObject(emptyMap())
+        AniList.query(
+            Queries.BROWSE,
+            buildJsonObject {
+                put("page", params.intOr("page", 1))
+                put("perPage", params.intOr("perPage", 40))
+                obj["search"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { put("search", it) }
+                obj["genres"]?.let { genres ->
+                    val list = genres as? JsonArray ?: buildJsonArray { add(genres) }
+                    if (list.isNotEmpty()) put("genres", list)
+                }
+                obj["sort"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let {
+                    put("sort", buildJsonArray { add(JsonPrimitive(it)) })
+                }
+                obj["format"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { put("format", it) }
+                obj["status"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { put("status", it) }
+                obj["season"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { season ->
+                    put("season", season)
+                    put("seasonYear", params.intOr("seasonYear", LocalDate.now().year))
+                }
+            },
+        ).page()
+    }
+
+    /** AniList's canonical genre list, so the Genres screen is never out of date. */
+    register("anilist.genres") { _, _ ->
+        AniList.query(Queries.GENRES)["GenreCollection"] ?: JsonArray(emptyList())
+    }
+
+    /**
+     * Airing schedule for a window of days. Defaults to the seven days starting today,
+     * which is exactly what the Calendar screen shows.
+     */
+    register("anilist.airing") { params, _ ->
+        val days = params.intOr("days", 7).coerceIn(1, 14)
+        val start = params.intOr("start", (System.currentTimeMillis() / 1000).toInt())
+        AniList.query(
+            Queries.AIRING,
+            buildJsonObject {
+                put("start", start - 1)
+                put("end", start + days * 86_400)
+                put("page", params.intOr("page", 1))
+                put("perPage", params.intOr("perPage", 50))
             },
         ).page()
     }

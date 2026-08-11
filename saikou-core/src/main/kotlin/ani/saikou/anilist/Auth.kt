@@ -6,6 +6,7 @@ import ani.saikou.host.Preferences
 import ani.saikou.net.Http
 import ani.saikou.rpc.ErrorCodes
 import ani.saikou.rpc.RpcException
+import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
@@ -21,12 +22,16 @@ import kotlin.io.path.exists
 import kotlin.io.path.readText
 
 /**
- * AniList sign-in using the authorization code grant with a loopback redirect.
+ * AniList sign-in: press one button, approve in the browser, done.
  *
- * The implicit grant the Android app uses returns the token in the URL *fragment*, which
- * a local listener never receives — so desktop uses the code grant instead. That needs a
- * client id and secret, which means each user registers their own AniList API client at
- * https://anilist.co/settings/developer with the redirect url below.
+ * Only the authorization-code grant is available. AniList answers `response_type=token`
+ * with `unsupported_grant_type`, and its token endpoint answers `invalid_client` when the
+ * request carries no secret — so the implicit grant and PKCE are both off the table, and
+ * signing in means holding a client id *and* secret.
+ *
+ * Those come from [BundledClient], written at build time from the environment and never
+ * committed. A build without them still signs in, but the user has to supply a client of
+ * their own first (see [configure]).
  */
 object Auth {
     private const val TAG = "AniListAuth"
@@ -44,18 +49,58 @@ object Auth {
     var token: String? = null
         private set
 
-    val clientId: String? get() = Preferences.get(CLIENT_ID_KEY)?.jsonPrimitive?.contentOrNull()
-    val clientSecret: String? get() = Preferences.get(CLIENT_SECRET_KEY)?.jsonPrimitive?.contentOrNull()
+    /** An id and its matching secret. The two are never mixed across sources. */
+    private data class Client(val id: String, val secret: String)
+
+    private val ownClient: Client?
+        get() {
+            val id = Preferences.get(CLIENT_ID_KEY)?.jsonPrimitive?.contentOrNull() ?: return null
+            val secret = Preferences.get(CLIENT_SECRET_KEY)?.jsonPrimitive?.contentOrNull() ?: return null
+            return Client(id, secret)
+        }
+
+    /**
+     * The user's client wins over the built-in one, and the pair is taken whole: pairing a
+     * user's id with the bundled secret would authenticate as neither client.
+     */
+    private val activeClient: Client?
+        get() = ownClient
+            ?: environmentClient()
+            ?: Client(BundledClient.ID, BundledClient.SECRET).takeIf {
+                it.id.isNotBlank() && it.secret.isNotBlank()
+            }
+
+    private fun environmentClient(): Client? {
+        val id = System.getenv("SAIKOU_ANILIST_CLIENT_ID")?.takeIf { it.isNotBlank() } ?: return null
+        val secret = System.getenv("SAIKOU_ANILIST_CLIENT_SECRET")?.takeIf { it.isNotBlank() } ?: return null
+        return Client(id, secret)
+    }
+
+    val clientId: String? get() = activeClient?.id
+
     val port: Int get() = Preferences.get(PORT_KEY)?.jsonPrimitive?.contentOrNull()?.toIntOrNull() ?: DEFAULT_PORT
 
     val redirectUri: String get() = "http://localhost:$port$CALLBACK_PATH"
 
-    val isConfigured: Boolean get() = !clientId.isNullOrBlank() && !clientSecret.isNullOrBlank()
+    /** True when a sign-in can be started at all. */
+    val isConfigured: Boolean get() = activeClient != null
+
+    /** True when the user pointed Saikou at their own AniList client instead of this build's. */
+    val usesOwnClient: Boolean get() = ownClient != null
+
+    /** True when this build carries a client of its own, so the user needs to supply nothing. */
+    val hasBundledClient: Boolean get() = BundledClient.ID.isNotBlank() && BundledClient.SECRET.isNotBlank()
+
     val isLoggedIn: Boolean get() = token != null
 
+    /**
+     * Points sign-in at a client of the user's own. Both values are required — AniList
+     * rejects a token request without a secret — and blanking either returns to the
+     * built-in client.
+     */
     fun configure(clientId: String, clientSecret: String, port: Int?) {
-        Preferences.set(CLIENT_ID_KEY, JsonPrimitive(clientId.trim()))
-        Preferences.set(CLIENT_SECRET_KEY, JsonPrimitive(clientSecret.trim()))
+        Preferences.set(CLIENT_ID_KEY, clientId.trim().takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) })
+        Preferences.set(CLIENT_SECRET_KEY, clientSecret.trim().takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) })
         port?.let { Preferences.set(PORT_KEY, JsonPrimitive(it)) }
     }
 
@@ -71,27 +116,21 @@ object Auth {
 
     /** The url the UI opens in the user's browser. */
     fun authorizeUrl(): String {
-        val id = clientId ?: throw RpcException(
-            ErrorCodes.NOT_AUTHENTICATED,
-            "No AniList client is configured. Create one at https://anilist.co/settings/developer.",
-        )
+        val client = activeClient ?: throw noClientError()
         return "https://anilist.co/api/v2/oauth/authorize" +
-            "?client_id=$id&redirect_uri=$redirectUri&response_type=code"
+            "?client_id=${client.id}&redirect_uri=$redirectUri&response_type=code"
     }
 
     /**
-     * Runs the loopback listener until AniList redirects back, then trades the code for a
-     * token. Blocks the calling coroutine, so callers dispatch it off the RPC read loop.
+     * Runs the loopback listener until the browser comes back with a token, then stores it.
+     * Blocks the calling coroutine, so callers dispatch it off the RPC read loop.
      */
     suspend fun awaitLogin(timeoutSeconds: Long = 300): String {
-        if (!isConfigured) {
-            throw RpcException(
-                ErrorCodes.NOT_AUTHENTICATED,
-                "Set your AniList client id and secret first.",
-            )
-        }
+        if (!isConfigured) throw noClientError()
 
+        val client = activeClient ?: throw noClientError()
         val code = CompletableFuture<String>()
+
         val server = try {
             HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
         } catch (e: Exception) {
@@ -105,21 +144,23 @@ object Auth {
 
         server.createContext(CALLBACK_PATH) { exchange ->
             val params = parseQuery(exchange.requestURI.rawQuery)
-            val received = params["code"]
-            val error = params["error"]
+            when {
+                params["code"] != null -> {
+                    code.complete(params.getValue("code"))
+                    exchange.reply(page("Signed in", "You can close this tab and go back to Saikou."))
+                }
 
-            val body = if (received != null) {
-                code.complete(received)
-                page("Signed in", "You can close this tab and go back to Saikou.")
-            } else {
-                code.completeExceptionally(IllegalStateException(error ?: "no code returned"))
-                page("Sign-in failed", error ?: "AniList did not return an authorization code.")
+                params["error"] != null -> {
+                    val message = params["error_description"] ?: params.getValue("error")
+                    code.completeExceptionally(IllegalStateException(message))
+                    exchange.reply(page("Sign-in failed", message))
+                }
+
+                else -> {
+                    code.completeExceptionally(IllegalStateException("no authorization code returned"))
+                    exchange.reply(page("Sign-in failed", "AniList did not return an authorization code."))
+                }
             }
-
-            val bytes = body.toByteArray()
-            exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
-            exchange.sendResponseHeaders(200, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
         }
 
         server.start()
@@ -134,20 +175,29 @@ object Auth {
                 retryable = true,
             )
         } finally {
-            server.stop(0)
+            // Give the browser a moment to finish reading the "signed in" page before the
+            // socket goes away, or the tab shows a connection error on success.
+            server.stop(1)
         }
 
-        return exchangeCode(authorizationCode)
+        return exchangeCode(client, authorizationCode)
     }
 
-    private suspend fun exchangeCode(code: String): String {
+    private fun noClientError() = RpcException(
+        ErrorCodes.NOT_AUTHENTICATED,
+        "This build carries no AniList client, so one-click sign-in is unavailable. Add your " +
+            "own client id and secret under Settings → Account, or set " +
+            "SAIKOU_ANILIST_CLIENT_ID and SAIKOU_ANILIST_CLIENT_SECRET.",
+    )
+
+    private suspend fun exchangeCode(client: Client, code: String): String {
         val response = Http.post(
             "https://anilist.co/api/v2/oauth/token",
             headers = mapOf("Accept" to "application/json"),
             data = mapOf(
                 "grant_type" to "authorization_code",
-                "client_id" to clientId.orEmpty(),
-                "client_secret" to clientSecret.orEmpty(),
+                "client_id" to client.id,
+                "client_secret" to client.secret,
                 "redirect_uri" to redirectUri,
                 "code" to code,
             ),
@@ -179,6 +229,13 @@ object Auth {
         token = value
     }
 
+    private fun HttpExchange.reply(body: String) {
+        val bytes = body.toByteArray()
+        responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+        sendResponseHeaders(200, bytes.size.toLong())
+        responseBody.use { it.write(bytes) }
+    }
+
     private fun parseQuery(raw: String?): Map<String, String> =
         raw.orEmpty().split('&').mapNotNull {
             val parts = it.split('=', limit = 2)
@@ -190,13 +247,18 @@ object Auth {
     private fun page(title: String, message: String) = """
         <!doctype html>
         <html><head><meta charset="utf-8"><title>$title</title>
+        $STYLE
+        </head>
+        <body><div><h1>$title</h1><p>$message</p></div></body></html>
+    """.trimIndent()
+
+    private val STYLE = """
         <style>
           body { font-family: system-ui, sans-serif; display: grid; place-content: center;
-                 height: 100vh; margin: 0; background: #16181d; color: #e8eaed; text-align: center; }
-          h1 { font-weight: 600; font-size: 1.4rem; margin-bottom: .5rem; }
-          p { color: #9aa0a6; }
-        </style></head>
-        <body><div><h1>$title</h1><p>$message</p></div></body></html>
+                 height: 100vh; margin: 0; background: #161516; color: #ffffff; text-align: center; }
+          h1 { font-weight: 600; font-size: 1.4rem; margin-bottom: .5rem; color: #FB5DAC; }
+          p { color: #9d9d9b; }
+        </style>
     """.trimIndent()
 
     @Serializable
