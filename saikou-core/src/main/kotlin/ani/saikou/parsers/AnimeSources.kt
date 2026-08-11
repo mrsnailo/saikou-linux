@@ -7,6 +7,7 @@ import ani.saikou.parsers.anime.AnimeHeaven
 import ani.saikou.parsers.anime.AnimePahe
 import ani.saikou.parsers.anime.Anikoto
 import ani.saikou.parsers.anime.ApiBackend
+import ani.saikou.parsers.anime.KickAssAnime
 import ani.saikou.parsers.anime.Anizone
 
 /**
@@ -18,9 +19,10 @@ import ani.saikou.parsers.anime.Anizone
  * is what the UI shows, because a source the user cannot use should say why rather than
  * fail when clicked.
  *
- * Order matters: [default] takes the first usable entry, so the standalone source that
- * actually resolves comes first. AllAnime is kept below it because its API sits behind a
- * Cloudflare challenge that many connections do not pass.
+ * Order matters: [default] takes the first usable entry, so the standalone sources that
+ * actually resolve come first — KickAssAnime ahead of AnimeHeaven because it serves HLS
+ * with subtitle tracks rather than a bare MP4. AllAnime is kept below both because its API
+ * sits behind a Cloudflare challenge that many connections do not pass.
  */
 object AnimeSources {
     private data class Entry(
@@ -31,6 +33,7 @@ object AnimeSources {
     )
 
     private val entries: List<Entry> = listOf(
+        Entry("KickAssAnime", ::KickAssAnime, standalone = true),
         Entry("AnimeHeaven", ::AnimeHeaven, standalone = true),
         Entry("AllAnime", ::AllAnime, standalone = true),
         Entry("Anikoto", ::Anikoto, standalone = false),

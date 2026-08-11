@@ -132,12 +132,13 @@ private fun JsonElement?.parser(): AnimeParser {
 
     // Only the API-backed sources need the private backend. Refusing every call whenever it
     // is unset — which is the normal state — is what made a fresh install unable to play
-    // anything at all, including through AllAnime, which needs no backend.
+    // anything at all, including through the sources that need no backend.
     if (!AnimeSources.isStandalone(parser.name) && !ApiBackend.isConfigured) {
         throw RpcException(
             ErrorCodes.CAPABILITY_MISSING,
             "${parser.name} needs the private backend API, which is not configured. " +
-                "Set it in Settings → Sources, or pick AllAnime, which needs no backend.",
+                "Set it in Settings → Sources, or pick KickAssAnime or AnimeHeaven, " +
+                    "which need no backend.",
             source = parser.name,
             retryable = false,
         )

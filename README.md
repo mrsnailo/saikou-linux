@@ -16,12 +16,12 @@ Working today:
 - mpv playback through the render API (works on Wayland), with subtitles and referer-locked streams
 - The full source pipeline: search → episodes → servers → stream resolution
 
-**Sources:** AllAnime works out of the box — it talks to its own public API and needs no
-configuration. The other six (Anikoto, AniBD, Anizone, AnimeHeaven, AniDB, AnimePahe)
-proxy through a single private backend API. The Android app injected its address and key
-at build time as `BuildConfig.SERVER_URL` and `BuildConfig.MY_CUSTOM_API_KEY`; neither
-value is in this repository, so those six report themselves unavailable until you supply
-them. See [Anime sources](#anime-sources).
+**Sources:** KickAssAnime and AnimeHeaven work out of the box — both scrape their site
+directly and need no configuration. The remaining five (Anikoto, AniBD, Anizone, AniDB,
+AnimePahe) proxy through a single private backend API. The Android app injected its address
+and key at build time as `BuildConfig.SERVER_URL` and `BuildConfig.MY_CUSTOM_API_KEY`;
+neither value is in this repository, so those five report themselves unavailable until you
+supply them. See [Anime sources](#anime-sources).
 
 ## Installing
 
@@ -82,12 +82,19 @@ Progress syncs automatically once you pass 85% of an episode.
 
 ## Anime sources
 
-**AllAnime** needs nothing: it queries allanime.day's public GraphQL API directly. Its
-endpoint sits behind Cloudflare, which lets ordinary residential connections through but
-frequently challenges datacentre and VPN addresses; when that happens the source says so
-rather than failing silently.
+Two sources need nothing at all:
 
-The remaining six proxy through the private backend API. Set it in **Settings → Sources**,
+| Source | How it works | What you get |
+|---|---|---|
+| **KickAssAnime** | The JSON API its own web player uses. `kaa.to` only redirects — the live mirror rotates, so the parser resolves it once per run. | HLS, several resolutions, real subtitle tracks. The default. |
+| **AnimeHeaven** | Plain HTML scrape. An episode is selected by a cookie rather than a url, so the "server" carries that cookie. | Direct MP4 across three CDN mirrors. No subtitle tracks — the video is hardsubbed. |
+
+**AllAnime** also needs no backend, but its endpoint sits behind Cloudflare, which lets
+some residential connections through and challenges datacentre and VPN addresses; when
+that happens the source says so rather than failing silently. Anything it plays,
+KickAssAnime plays too, so it is not the default.
+
+The remaining five proxy through the private backend API. Set it in **Settings → Sources**,
 or with environment variables:
 
 ```sh
@@ -95,7 +102,7 @@ SAIKOU_API_HOST=https://your-backend SAIKOU_API_KEY=your-key saikou-ui
 ```
 
 Both are also stored in `~/.config/saikou/settings.json` once saved. Supplying them
-enables all seven sources at once.
+enables all eight sources at once.
 
 If you do not have that backend, the alternative is a new parser written against a public
 site. `saikou-core/vendor/README.md` describes the porting contract.
