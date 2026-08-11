@@ -285,6 +285,9 @@ jobs:
           they report themselves unavailable until you set one under **Settings → Sources**.
           EOF
 
+          # --repo explicitly: this job downloads artifacts rather than checking out, so
+          # there is no git repository here for gh to infer the target from.
           gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Saikou $version" \
             --notes-file /tmp/notes.md
