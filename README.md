@@ -37,6 +37,18 @@ sudo pacman -U saikou-linux-*-x86_64.pkg.tar.zst
 pacman pulls in `qt6-base`, `mpv` and a JRE. Saikou then appears in your application
 launcher and KRunner.
 
+### AppImage, on any other distribution
+
+```sh
+chmod +x Saikou-*-x86_64.AppImage
+./Saikou-*-x86_64.AppImage
+```
+
+It carries Qt and its own Java runtime — the core is a JVM daemon, so a system JRE would
+otherwise be a hard requirement on a machine that has no reason to have one. What it still
+needs from the host is mpv's libraries and a glibc no older than Ubuntu 24.04's, which is
+what the release is built against.
+
 ### From source
 
 ```sh

@@ -33,8 +33,12 @@ fun main(args: Array<String>) {
 
     // Single instance per socket. Without this, a second daemon would delete the live
     // socket during start() and silently steal the UI's connections.
+    //
+    // The lock is named after the socket, not the directory: `--socket` exists so a second
+    // daemon can be run alongside the first, and a shared `core.lock` made every one of
+    // them refuse to start with a message naming a socket nobody held.
     val lock = FileChannel.open(
-        socket.resolveSibling("core.lock"),
+        socket.resolveSibling("${socket.fileName}.lock"),
         StandardOpenOption.CREATE, StandardOpenOption.WRITE
     ).tryLock()
 
