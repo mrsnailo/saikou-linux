@@ -1,6 +1,6 @@
 # Maintainer: your name <you@example.com>
 pkgname=saikou-linux-git
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Native Linux anime client with AniList tracking (Qt6 + mpv)"
 arch=('x86_64')

@@ -2,7 +2,7 @@
 # CI generates the tarball next to this file; see .github/workflows/release.yml.
 # The AUR-style git package lives in ../PKGBUILD.
 pkgname=saikou-linux
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Native Linux anime client with AniList tracking (Qt6 + mpv)"
 arch=('x86_64')

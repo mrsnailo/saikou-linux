@@ -53,6 +53,18 @@
   </content_rating>
 
   <releases>
+    <release version="0.2.0" type="development" date="2026-08-11">
+      <description>
+        <p>The interface rebuilt from the desktop design, one-click AniList sign-in, and
+        three anime sources that need no configuration.</p>
+        <ul>
+          <li>AniBD, KickAssAnime and AnimeHeaven work out of the box</li>
+          <li>Opening a title now finds the right one instead of the first search hit</li>
+          <li>Components animate on a shared clock rather than repainting</li>
+          <li>An AppImage is published alongside the Arch package</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" type="development" date="2026-08-09">
       <description>
         <p>Phase 0: project scaffolding, core daemon, and RPC transport.</p>
