@@ -12,11 +12,15 @@ import ani.saikou.parsers.anime.Anizone
 /**
  * The anime source registry.
  *
- * AllAnime talks to its own public API and is always available, so a fresh install can
- * play something without any configuration. The rest proxy through the private backend
- * described in [ApiBackend] and stay unavailable until it is set up; [availability] is
- * what the UI shows, because a source the user cannot use should say why rather than fail
- * when clicked.
+ * The standalone sources scrape their site directly and are always available, so a fresh
+ * install can play something without any configuration. The rest proxy through the private
+ * backend described in [ApiBackend] and stay unavailable until it is set up; [availability]
+ * is what the UI shows, because a source the user cannot use should say why rather than
+ * fail when clicked.
+ *
+ * Order matters: [default] takes the first usable entry, so the standalone source that
+ * actually resolves comes first. AllAnime is kept below it because its API sits behind a
+ * Cloudflare challenge that many connections do not pass.
  */
 object AnimeSources {
     private data class Entry(
@@ -27,11 +31,11 @@ object AnimeSources {
     )
 
     private val entries: List<Entry> = listOf(
+        Entry("AnimeHeaven", ::AnimeHeaven, standalone = true),
         Entry("AllAnime", ::AllAnime, standalone = true),
         Entry("Anikoto", ::Anikoto, standalone = false),
         Entry("AniBD", ::AniBD, standalone = false),
         Entry("Anizone", ::Anizone, standalone = false),
-        Entry("AnimeHeaven", ::AnimeHeaven, standalone = false),
         Entry("AniDB", ::AniDB, standalone = false),
         Entry("AnimePahe", ::AnimePahe, standalone = false),
     )

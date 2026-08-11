@@ -192,12 +192,6 @@ class Anizone : ApiParser() {
     override val shape = Shape.SINGLE_SERVER
 }
 
-class AnimeHeaven : ApiParser() {
-    override val name = "AnimeHeaven"
-    override val providerName = "animeheaven"
-    override val shape = Shape.SINGLE_SERVER
-}
-
 class AniDB : ApiParser() {
     override val name = "AniDB"
     override val providerName = "anidb"
