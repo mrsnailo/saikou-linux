@@ -1,10 +1,12 @@
 #include "SideBar.h"
 
+#include "../theme/Motion.h"
 #include "../theme/Theme.h"
 #include "../theme/Type.h"
 
 #include <QFontMetrics>
 #include <QPainter>
+#include <QVariantAnimation>
 #include <QVBoxLayout>
 
 namespace {
@@ -40,13 +42,44 @@ NavItem::NavItem(Icons::Name icon, const QString &label, const QString &shortcut
     connect(Theme::instance(), &Theme::changed, this, qOverload<>(&QWidget::update));
 }
 
+QVariantAnimation *NavItem::tween(QVariantAnimation *&slot, qreal &value, qreal to, int ms)
+{
+    if (slot) {
+        slot->stop();
+        slot->deleteLater();
+    }
+    slot = new QVariantAnimation(this);
+    slot->setDuration(ms);
+    slot->setEasingCurve(Motion::Enter);
+    slot->setStartValue(value);
+    slot->setEndValue(to);
+    connect(slot, &QVariantAnimation::valueChanged, this, [this, &value](const QVariant &v) {
+        value = v.toReal();
+        update();
+    });
+    slot->start();
+    return slot;
+}
+
 void NavItem::setCurrent(bool current)
 {
     if (m_current == current) {
         return;
     }
     m_current = current;
-    update();
+    tween(m_selectAnimation, m_selected, current ? 1.0 : 0.0, Motion::Base);
+}
+
+void NavItem::enterEvent(QEnterEvent *event)
+{
+    QAbstractButton::enterEvent(event);
+    tween(m_hoverAnimation, m_hovered, 1.0, Motion::Fast);
+}
+
+void NavItem::leaveEvent(QEvent *event)
+{
+    QAbstractButton::leaveEvent(event);
+    tween(m_hoverAnimation, m_hovered, 0.0, Motion::Fast);
 }
 
 void NavItem::paintEvent(QPaintEvent *)
@@ -56,24 +89,33 @@ void NavItem::paintEvent(QPaintEvent *)
     painter.setRenderHint(QPainter::Antialiasing, true);
 
     const QRectF box(0, 0, width(), height());
-    const bool hovered = underMouse();
+    const qreal lit = qMax(m_selected, m_hovered);
 
-    if (m_current || hovered) {
+    if (lit > 0.001) {
+        QColor fill = t.card;
+        fill.setAlphaF(fill.alphaF() * lit);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(t.card);
+        painter.setBrush(fill);
         painter.drawRoundedRect(box, t.rSm, t.rSm);
     }
 
-    if (m_current) {
+    if (m_selected > 0.001) {
         // `.nav-item[aria-current]::before` — the marker sits in the sidebar's padding,
-        // so it is drawn at negative x relative to the row.
-        painter.setBrush(t.accent);
-        painter.drawRoundedRect(QRectF(-12, (height() - 20) / 2.0, 5, 20), 2, 2);
+        // so it is drawn at negative x relative to the row. It grows out of the centre
+        // rather than appearing at full height, which is what makes the selection look
+        // like it travelled from the previous row instead of blinking on.
+        const qreal markerHeight = 20 * m_selected;
+        QColor marker = t.accent;
+        marker.setAlphaF(m_selected);
+        painter.setBrush(marker);
+        painter.setPen(Qt::NoPen);
+        painter.drawRoundedRect(QRectF(-12, (height() - markerHeight) / 2.0, 5, markerHeight),
+                                2, 2);
     }
 
-    const QColor foreground = m_current || hovered ? t.fg : t.muted;
+    const QColor foreground = Motion::blend(t.muted, t.fg, lit);
     Icons::paint(&painter, m_icon, QRectF(14, (height() - 18) / 2.0, 18, 18),
-                 m_current ? t.accent : foreground);
+                 Motion::blend(foreground, t.accent, m_selected));
 
     painter.setFont(font());
     painter.setPen(foreground);

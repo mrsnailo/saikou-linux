@@ -2,12 +2,14 @@
 
 #include "../ImageLoader.h"
 #include "../theme/Icons.h"
+#include "../theme/Motion.h"
 #include "../theme/Theme.h"
 #include "../theme/Type.h"
 
 #include <QContextMenuEvent>
 #include <QFontMetrics>
 #include <QPainter>
+#include <QMouseEvent>
 #include <QPainterPath>
 #include <QTimer>
 
@@ -16,6 +18,8 @@ namespace {
 constexpr int kTitleBlockHeight = 58;  // two title lines plus the meta caption
 constexpr int kGapAboveTitle = 10;
 constexpr int kLiftPixels = 6;
+/// How far past its frame the art creeps at full hover. Subtle on purpose.
+constexpr qreal kHoverZoom = 0.05;
 
 /** Scales and centre-crops `source` to fill `size`, the way `object-fit: cover` does. */
 QPixmap coverScaled(const QPixmap &source, const QSize &size)
@@ -35,6 +39,7 @@ QPixmap coverScaled(const QPixmap &source, const QSize &size)
 PosterCard::PosterCard(QWidget *parent)
     : QAbstractButton(parent)
     , m_liftAnimation(new QVariantAnimation(this))
+    , m_coverAnimation(new QVariantAnimation(this))
 {
     setCursor(Qt::PointingHandCursor);
     setFocusPolicy(Qt::StrongFocus);
@@ -43,10 +48,21 @@ PosterCard::PosterCard(QWidget *parent)
     policy.setHeightForWidth(true);
     setSizePolicy(policy);
 
-    m_liftAnimation->setDuration(180);
-    m_liftAnimation->setEasingCurve(QEasingCurve::OutCubic);
+    m_liftAnimation->setDuration(Motion::Base);
+    m_liftAnimation->setEasingCurve(Motion::Enter);
     connect(m_liftAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
         m_lift = value.toReal();
+        update();
+    });
+
+    // A cover that pops in is the most visible jank on the home screen, because a rail
+    // fills a dozen at once and each arrives at its own moment.
+    m_coverAnimation->setDuration(Motion::Slow);
+    m_coverAnimation->setEasingCurve(Motion::Enter);
+    m_coverAnimation->setStartValue(qreal(0));
+    m_coverAnimation->setEndValue(qreal(1));
+    connect(m_coverAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+        m_coverFade = value.toReal();
         update();
     });
 
@@ -67,10 +83,12 @@ void PosterCard::setMedia(const Media &media)
     setToolTip(media.title);
     setAccessibleName(media.title);
 
+    // A cached cover was already on screen a moment ago, so it is drawn at full strength;
+    // only a cover that had to be fetched is worth fading up.
     const QPixmap cached = ImageLoader::instance()->get(media.coverUrl);
-    if (!cached.isNull()) {
-        m_cover = cached;
-    }
+    m_coverAnimation->stop();
+    m_cover = cached;
+    m_coverFade = 1.0;
     update();
 }
 
@@ -150,6 +168,7 @@ void PosterCard::enterEvent(QEnterEvent *event)
 {
     QAbstractButton::enterEvent(event);
     m_liftAnimation->stop();
+    m_liftAnimation->setDuration(Motion::Base);
     m_liftAnimation->setStartValue(m_lift);
     m_liftAnimation->setEndValue(qreal(kLiftPixels));
     m_liftAnimation->start();
@@ -159,6 +178,7 @@ void PosterCard::leaveEvent(QEvent *event)
 {
     QAbstractButton::leaveEvent(event);
     m_liftAnimation->stop();
+    m_liftAnimation->setDuration(Motion::Base);
     m_liftAnimation->setStartValue(m_lift);
     m_liftAnimation->setEndValue(qreal(0));
     m_liftAnimation->start();
@@ -174,10 +194,35 @@ void PosterCard::contextMenuEvent(QContextMenuEvent *event)
 
 void PosterCard::onImageLoaded(const QString &url, const QPixmap &pixmap)
 {
-    if (url == m_media.coverUrl) {
-        m_cover = pixmap;
-        update();
+    if (url != m_media.coverUrl) {
+        return;
     }
+    m_cover = pixmap;
+    m_coverFade = 0.0;
+    m_coverAnimation->start();
+    update();
+}
+
+void PosterCard::mousePressEvent(QMouseEvent *event)
+{
+    QAbstractButton::mousePressEvent(event);
+    // Press settles the card back towards the page — the lift is what says "this is
+    // reachable", so taking it away is what says "you have reached it".
+    m_liftAnimation->stop();
+    m_liftAnimation->setStartValue(m_lift);
+    m_liftAnimation->setEndValue(qreal(kLiftPixels) * 0.25);
+    m_liftAnimation->setDuration(Motion::Fast);
+    m_liftAnimation->start();
+}
+
+void PosterCard::mouseReleaseEvent(QMouseEvent *event)
+{
+    QAbstractButton::mouseReleaseEvent(event);
+    m_liftAnimation->stop();
+    m_liftAnimation->setStartValue(m_lift);
+    m_liftAnimation->setEndValue(underMouse() ? qreal(kLiftPixels) : qreal(0));
+    m_liftAnimation->setDuration(Motion::Base);
+    m_liftAnimation->start();
 }
 
 void PosterCard::paintEvent(QPaintEvent *)
@@ -214,9 +259,10 @@ void PosterCard::paintEvent(QPaintEvent *)
     // --- poster ---
     painter.save();
     painter.setClipPath(clip);
-    if (!m_cover.isNull()) {
-        painter.drawPixmap(poster.toRect(), coverScaled(m_cover, poster.size().toSize()));
-    } else {
+
+    // The placeholder is painted first and always, so a cover fading in has something to
+    // arrive over instead of a hole that has to be filled in the same frame.
+    if (m_cover.isNull() || m_coverFade < 1.0) {
         // The `.kv` placeholder: two soft radial washes over a near-black base, so an
         // unloaded card is still a composed rectangle rather than a grey hole.
         painter.fillRect(poster, t.card);
@@ -237,6 +283,19 @@ void PosterCard::paintEvent(QPaintEvent *)
         painter.setFont(Type::h2());
         painter.drawText(poster, Qt::AlignCenter,
                          m_media.title.left(1).toUpper());
+    }
+
+    if (!m_cover.isNull()) {
+        // Hovering pushes the art slightly past the frame it is clipped to, so the card
+        // reads as a window onto the poster rather than a picture that grew.
+        const qreal zoom = 1.0 + kHoverZoom * (m_lift / kLiftPixels);
+        const QSizeF target = poster.size() * zoom;
+        const QRectF drawn(poster.center().x() - target.width() / 2.0,
+                           poster.center().y() - target.height() / 2.0,
+                           target.width(), target.height());
+        painter.setOpacity(m_coverFade);
+        painter.drawPixmap(drawn.toRect(), coverScaled(m_cover, target.toSize()));
+        painter.setOpacity(1.0);
     }
     painter.restore();
 

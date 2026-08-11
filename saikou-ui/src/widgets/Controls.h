@@ -83,6 +83,12 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+
+private:
+    /// 0 off, 1 on. The knob and both colours are interpolated from it, so a toggle
+    /// travels instead of teleporting — the one control where that reads as mechanism.
+    qreal m_on = 0.0;
+    class QVariantAnimation *m_animation = nullptr;
 };
 
 /** Button style variants from `saikou.css`, applied as dynamic properties for the QSS. */

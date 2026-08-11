@@ -50,6 +50,8 @@ protected:
     void enterEvent(QEnterEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 
 private:
@@ -65,5 +67,8 @@ private:
     int m_posterWidth = 150;
     qreal m_lift = 0.0;
     QVariantAnimation *m_liftAnimation;
+    /// 0 while the cover is still arriving, 1 once it has faded in over the placeholder.
+    qreal m_coverFade = 1.0;
+    QVariantAnimation *m_coverAnimation;
     int m_shimmerPhase = 0;
 };

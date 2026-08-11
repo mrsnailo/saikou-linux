@@ -1,10 +1,12 @@
 #include "Controls.h"
 
+#include "../theme/Motion.h"
 #include "../theme/Theme.h"
 #include "../theme/Type.h"
 
 #include <QFontMetrics>
 #include <QPainter>
+#include <QVariantAnimation>
 #include <QPushButton>
 
 namespace {
@@ -207,10 +209,32 @@ void Chip::paintEvent(QPaintEvent *)
 
 Switch::Switch(QWidget *parent)
     : QAbstractButton(parent)
+    , m_animation(new QVariantAnimation(this))
 {
     setCheckable(true);
     setCursor(Qt::PointingHandCursor);
     setFocusPolicy(Qt::StrongFocus);
+
+    m_animation->setDuration(Motion::Base);
+    m_animation->setEasingCurve(Motion::Enter);
+    connect(m_animation, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+        m_on = value.toReal();
+        update();
+    });
+    connect(this, &QAbstractButton::toggled, this, [this](bool checked) {
+        m_animation->stop();
+        // Settings sets every switch to its stored value as the page is built. Animating
+        // that would make opening Settings look like the machine was flipping switches.
+        if (!isVisible()) {
+            m_on = checked ? 1.0 : 0.0;
+            update();
+            return;
+        }
+        m_animation->setStartValue(m_on);
+        m_animation->setEndValue(checked ? 1.0 : 0.0);
+        m_animation->start();
+    });
+
     connect(Theme::instance(), &Theme::changed, this, qOverload<>(&QWidget::update));
 }
 
@@ -222,11 +246,11 @@ void Switch::paintEvent(QPaintEvent *)
 
     const QRectF track(0, (height() - 22) / 2.0, 40, 22);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(isChecked() ? t.accent2Dim : t.cardHi);
+    painter.setBrush(Motion::blend(t.cardHi, t.accent2Dim, m_on));
     painter.drawRoundedRect(track, 11, 11);
 
-    const qreal knobX = track.left() + (isChecked() ? 21 : 3);
-    painter.setBrush(isChecked() ? t.accent2 : t.muted);
+    const qreal knobX = track.left() + 3 + 18 * m_on;
+    painter.setBrush(Motion::blend(t.muted, t.accent2, m_on));
     painter.drawEllipse(QRectF(knobX, track.top() + 3, 16, 16));
 
     if (hasFocus()) {

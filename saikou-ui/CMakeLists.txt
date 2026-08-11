@@ -50,6 +50,8 @@ add_executable(saikou-ui
 
     src/theme/Icons.cpp
     src/theme/Icons.h
+    src/theme/Motion.cpp
+    src/theme/Motion.h
     src/theme/Theme.cpp
     src/theme/Theme.h
     src/theme/Type.cpp

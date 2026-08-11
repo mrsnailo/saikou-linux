@@ -45,6 +45,8 @@ private:
     void wirePages();
 
     void showView(View view);
+    /// Swaps the stacked page and fades the arriving one up.
+    void showPage(int index);
     void openDetails(int mediaId);
     void playMedia(int mediaId);
     void showMediaMenu(int mediaId, const QPoint &globalPos);

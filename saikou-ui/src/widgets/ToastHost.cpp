@@ -1,11 +1,13 @@
 #include "ToastHost.h"
 
+#include "../theme/Motion.h"
 #include "../theme/Theme.h"
 #include "../theme/Type.h"
 #include "Controls.h"
 
 #include <QFontMetrics>
 #include <QPainter>
+#include <QPropertyAnimation>
 #include <QTimer>
 
 namespace {
@@ -113,13 +115,25 @@ void ToastHost::show(Icons::Name icon, const QString &title, const QString &body
     // hover-to-hold behaviour would never receive events.
     toast->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     connect(toast, &Toast::dismissed, this, [this](Toast *dismissed) {
+        // Dropped from the stack first so the toasts above it start closing the gap
+        // while it is still fading, rather than snapping down once it is gone.
         m_toasts.removeOne(dismissed);
-        dismissed->deleteLater();
         relayout();
+        Motion::fadeOut(dismissed, Motion::Base, [dismissed] { dismissed->deleteLater(); });
     });
     m_toasts.append(toast);
     toast->show();
     relayout();
+
+    // Placed by relayout(), then slid up into that slot from below.
+    auto *entrance = new QPropertyAnimation(toast, "pos", toast);
+    entrance->setDuration(Motion::Slow);
+    entrance->setEasingCurve(Motion::Enter);
+    entrance->setStartValue(toast->pos() + QPoint(0, 24));
+    entrance->setEndValue(toast->pos());
+    entrance->start(QAbstractAnimation::DeleteWhenStopped);
+    Motion::fadeIn(toast, Motion::Slow);
+
     raise();
 }
 
@@ -136,7 +150,22 @@ void ToastHost::relayout()
     for (int i = m_toasts.size() - 1; i >= 0; --i) {
         Toast *toast = m_toasts.at(i);
         y -= toast->height();
-        toast->move(width() - toast->width() - 20, y);
+        const QPoint target(width() - toast->width() - 20, y);
         y -= kGap;
+
+        // A toast that has never been placed goes straight to its slot — animating from
+        // the origin would fly it across the window. Anything already on screen slides.
+        if (toast->pos().isNull() || !toast->isVisible()) {
+            toast->move(target);
+            continue;
+        }
+        if (toast->pos() == target) {
+            continue;
+        }
+        auto *slide = new QPropertyAnimation(toast, "pos", toast);
+        slide->setDuration(Motion::Base);
+        slide->setEasingCurve(Motion::Enter);
+        slide->setEndValue(target);
+        slide->start(QAbstractAnimation::DeleteWhenStopped);
     }
 }

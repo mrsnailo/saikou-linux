@@ -27,11 +27,24 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void enterEvent(QEnterEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private:
+    /// Drives one 0→1 blend factor; the row paints itself from the two of them.
+    class QVariantAnimation *tween(class QVariantAnimation *&slot, qreal &value, qreal to,
+                                   int ms);
+
     Icons::Name m_icon;
     QString m_shortcutHint;
     bool m_current = false;
+
+    // The marker, the row fill and the label colour all interpolate rather than switch,
+    // so moving between pages reads as one continuous gesture instead of two repaints.
+    qreal m_selected = 0.0;
+    qreal m_hovered = 0.0;
+    class QVariantAnimation *m_selectAnimation = nullptr;
+    class QVariantAnimation *m_hoverAnimation = nullptr;
 };
 
 /**

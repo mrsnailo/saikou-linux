@@ -11,6 +11,7 @@
 #include "pages/LibraryPage.h"
 #include "pages/SettingsPage.h"
 #include "theme/Icons.h"
+#include "theme/Motion.h"
 #include "theme/Theme.h"
 #include "theme/Type.h"
 #include "widgets/SideBar.h"
@@ -263,13 +264,29 @@ void MainWindow::wireCore()
     m_core->start();
 }
 
+/**
+ * Swaps the visible page and fades the new one up.
+ *
+ * Only the arriving page is animated. Cross-fading would mean keeping the outgoing page
+ * visible over the top of it, and a stacked widget shows one child at a time — the
+ * half-second of both pages overlapping costs more than the transition buys.
+ */
+void MainWindow::showPage(int index)
+{
+    if (m_pages->currentIndex() == index) {
+        return;
+    }
+    m_pages->setCurrentIndex(index);
+    Motion::fadeIn(m_pages->currentWidget(), Motion::Base, 0.0);
+}
+
 void MainWindow::showView(View view)
 {
     if (view != View::Details) {
         m_previousView = view;
     }
     m_currentView = view;
-    m_pages->setCurrentIndex(pageIndex(view));
+    showPage(pageIndex(view));
     m_sidebar->setCurrentView(view);
 
     // Pages that would otherwise sit on stale data refresh on entry; Home and Browse
@@ -295,7 +312,7 @@ void MainWindow::openDetails(int mediaId)
     m_details->setPreferredSource(m_source);
     m_details->load(mediaId);
     m_currentView = View::Details;
-    m_pages->setCurrentIndex(pageIndex(View::Details));
+    showPage(pageIndex(View::Details));
     m_sidebar->setCurrentView(View::Details);
 }
 
@@ -307,7 +324,7 @@ void MainWindow::playMedia(int mediaId)
     m_details->setPreferredSource(m_source);
     m_details->loadAndPlayNext(mediaId);
     m_currentView = View::Details;
-    m_pages->setCurrentIndex(pageIndex(View::Details));
+    showPage(pageIndex(View::Details));
     m_sidebar->setCurrentView(View::Details);
 }
 
