@@ -5,7 +5,9 @@
 #include <QJsonDocument>
 #include <QProcessEnvironment>
 
+#ifndef Q_OS_WIN
 #include <unistd.h>
+#endif
 
 namespace {
 constexpr int kRetryIntervalMs = 400;
@@ -48,11 +50,15 @@ CoreClient::CoreClient(QObject *parent)
 
 QString CoreClient::defaultSocketPath()
 {
+#ifdef Q_OS_WIN
+    return QDir::tempPath() + QStringLiteral("/saikou/core.sock");
+#else
     const QString runtimeDir = QProcessEnvironment::systemEnvironment().value(QStringLiteral("XDG_RUNTIME_DIR"));
     if (!runtimeDir.isEmpty()) {
         return runtimeDir + QStringLiteral("/saikou/core.sock");
     }
     return QDir::tempPath() + QStringLiteral("/saikou-%1/core.sock").arg(::getuid());
+#endif
 }
 
 void CoreClient::connectToCore(const QString &socketPath)
