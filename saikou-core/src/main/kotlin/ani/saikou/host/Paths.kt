@@ -16,12 +16,18 @@ object Paths {
     val cache: Path = env("XDG_CACHE_HOME", home.resolve(".cache")).resolve("saikou")
 
     /**
-     * Runtime dir for the control socket. Falls back to a private dir under /tmp when
-     * XDG_RUNTIME_DIR is absent (ssh sessions, containers), created with 0700.
+     * Runtime dir for the control socket. Falls back to a private dir under temp dir when
+     * XDG_RUNTIME_DIR is absent (ssh sessions, containers, Windows).
      */
     val runtime: Path = run {
         val xdg = System.getenv("XDG_RUNTIME_DIR")
-        if (xdg.isNullOrBlank()) Path.of("/tmp", "saikou-${uid()}") else Path.of(xdg, "saikou")
+        if (xdg.isNullOrBlank()) {
+            val tmp = System.getProperty("java.io.tmpdir")
+            val user = System.getProperty("user.name", "0")
+            Path.of(tmp, "saikou-$user")
+        } else {
+            Path.of(xdg, "saikou")
+        }
     }
 
     val socket: Path = runtime.resolve("core.sock")
@@ -30,9 +36,13 @@ object Paths {
         listOf(config, data, cache).forEach { it.createDirectories() }
         runtime.createDirectories()
         // The socket carries no auth of its own; the directory mode is the access control.
-        runCatching { Files.setPosixFilePermissions(runtime, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")) }
+        if (runtime.fileSystem.supportedFileAttributeViews().contains("posix")) {
+            runCatching {
+                Files.setPosixFilePermissions(
+                    runtime,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")
+                )
+            }
+        }
     }
-
-    private fun uid(): String =
-        runCatching { com.sun.security.auth.module.UnixSystem().uid.toString() }.getOrDefault("0")
 }
