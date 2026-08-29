@@ -3,9 +3,13 @@
 #include "MpvWidget.h"
 
 #include <QCloseEvent>
+#ifndef Q_OS_WIN
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
+#else
+#include <windows.h>
+#endif
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QKeyEvent>
@@ -222,6 +226,13 @@ void PlayerWindow::closeEvent(QCloseEvent *event)
 
 void PlayerWindow::inhibitScreensaver(bool inhibit)
 {
+#ifdef Q_OS_WIN
+    if (inhibit) {
+        SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
+    } else {
+        SetThreadExecutionState(ES_CONTINUOUS);
+    }
+#else
     // Without this the desktop dims and locks mid-episode, since no input arrives while
     // watching. Failure here is not worth bothering the user about.
     QDBusInterface screensaver(QStringLiteral("org.freedesktop.ScreenSaver"),
@@ -243,4 +254,5 @@ void PlayerWindow::inhibitScreensaver(bool inhibit)
         screensaver.call(QStringLiteral("UnInhibit"), m_inhibitCookie);
         m_inhibitCookie = 0;
     }
+#endif
 }
